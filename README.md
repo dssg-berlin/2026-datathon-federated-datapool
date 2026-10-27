@@ -182,9 +182,11 @@ installed in that environment.
 
 ## Contributing
 
-Work on a feature branch and open a pull request against `main`. CI runs the offline tests
+Work on a feature branch and open a pull request against `dev`. CI runs the offline tests
 on every push. To add a tool, follow "Adding a query-backed tool" in
-[QUERIES.md](QUERIES.md) and "Testing a new feature" in [TEST.md](TEST.md).
+[QUERIES.md](QUERIES.md) and "Testing a new feature" in [TESTS.md](TESTS.md). 
+
+Once your feature is fully integrated into dev and tested, version it, follwing Semantic Versioning (semver). Main should always be a very stable version, ready for production or benchmarking.
 
 ## License
 
