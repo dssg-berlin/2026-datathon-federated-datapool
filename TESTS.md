@@ -241,6 +241,37 @@ Offline, no LLM: scripted models, a fake tool runner, and a stand-in `litellm` m
 | `test_parse_arguments` | tool arguments: JSON object, dict, invalid JSON, non-object |
 | `test_litellm_adapter_parses_tool_calls_and_uses_api_key` | tool calls, tokens and cost parsed; `api_key_env` and `api_base` passed to LiteLLM |
 | `test_litellm_adapter_reports_missing_api_key` | a missing key is a clear failure, not a crash |
+### `test_provenance.py` – `explain_provenance` and `list_sources`
+
+Offline, on a small synthetic TriG dataset (`PROVENANCE` in the test file) with the same
+named graphs as the live endpoint (`tests/helpers.py:load_dataset`): the finished directory,
+`mapped.ttl`, `matches.ttl`, `federation.ttl` and `ingest-log.ttl`. Entities and values are
+made up; the real `.rq` files run on it.
+
+| Test | Checks |
+|---|---|
+| `test_provenance_lists_source_records_with_detail_pages` | an entry with records from Caritas, DHS and Sozialplattform lists all three with record name and detail page (or `None`); type, name and limits are set |
+| `test_provenance_same_value_from_every_source_agrees` | the same name from all three sources → `sources_agree`, one value with three sources |
+| `test_provenance_attributes_each_differing_value` | two phone numbers → `sources_differ`; each value with its sources, the one with more sources first |
+| `test_provenance_shows_values_the_directory_dropped` | opening hours and detail page that resolution did not keep are listed with `in_directory: false` |
+| `test_provenance_flags_case_only_differences` | emails that differ only in case → `sources_differ` with `differs_only_in_case: true` |
+| `test_provenance_reports_value_inherited_from_parent` | a homepage only the Träger's record carries → `not_from_own_sources` with `inherited_from` (parent IRI, name, source, record) |
+| `test_provenance_entity_without_source_records` | an entry without source records: no sources, every field `not_from_own_sources`, `inherited_from: None` |
+| `test_provenance_field_filter` | `field` returns only that field; a field without any value → `no_value` |
+| `test_provenance_services_and_description_need_to_be_asked_for` | the long texts `services` / `description` are left out unless asked for by name |
+| `test_provenance_accepts_iri_and_short_id` (×4) | full IRI, `org-…`, `cdf:org-…` and padded input find the same entry |
+| `test_provenance_exact_name_wins_over_longer_names` | "jugendtreff MUSTER" picks the exact name, not "Jugendtreff Muster Nord" |
+| `test_provenance_single_partial_name_match_is_used` | a partial name with one match is explained directly |
+| `test_provenance_ambiguous_name_returns_candidates` | a name with several matches returns `found: false` and the candidates (IRI, name, alternate name, street, city) |
+| `test_provenance_unknown_name_and_iri` | unknown name → no candidates; unknown IRI → `found: false` with a hint about snapshots |
+| `test_provenance_quote_in_name_stays_inside_the_literal` | an injection-style name (quotes and SPARQL OR operators) matches nothing |
+| `test_provenance_rejects_malformed_iri_without_querying` (×5) | IRI-like input that is not a directory IRI raises `ValueError` and sends no query |
+| `test_provenance_rejects_empty_input` (×2) | empty or blank `facility` raises `ValueError` without a query |
+| `test_provenance_rejects_unknown_field` | an unknown `field` raises `ValueError` listing the valid fields, without a query |
+| `test_entity_iri` | names stay names; `org-`, `service-`, `traeger-` IDs become full IRIs |
+| `test_iri_placeholder_is_escaped_in_provenance_queries` | `{{iri}}` is escaped inside `IRI("…")` in both provenance queries |
+| `test_list_sources_counts_records_and_keeps_newest_harvest` | one row per source with coverage, record count and the newest harvest (an older observation is ignored) |
+| `test_list_sources_without_pipeline_graphs_is_empty` | without named graphs (like `data/directory.ttl`) the list is empty, not an error |
 
 ### `test_repository.py` – `DataRepository` (reference implementation)
 | Test | Checks |
@@ -275,7 +306,9 @@ Offline, no LLM: scripted models, a fake tool runner, and a stand-in `litellm` m
 Talks to the real `server.py` through an in-memory MCP client (plus one stdio launch).
 **Offline:** `tests/protocol/conftest.py` swaps the server's SPARQL client for
 `LocalSparqlClient` on `data/directory.ttl`, so every tool runs its real `.rq` queries without
-any request to the endpoint. The stdio launch only lists tools, so it sends no queries either.
+any request to the endpoint. The file is loaded as an rdflib dataset (`load_dataset`) because
+rdflib refuses `GRAPH` on a plain graph; it has no named graphs, so the provenance tools
+find no sources here. The stdio launch only lists tools, so it sends no queries either.
 `test_server.py` checks the MCP plumbing for every tool. `test_tools_e2e.py` checks each
 feature end to end: what a client gets over MCP is compared with facts read directly from
 the graph's triples (rdflib, not the `.rq` files).
@@ -284,14 +317,15 @@ the graph's triples (rdflib, not the `.rq` files).
 
 | Test | Checks |
 |---|---|
-| `test_baseline_tools_are_listed` | none of the 20 tools in `SMOKE_ARGS` disappeared |
+| `test_baseline_tools_are_listed` | none of the 22 tools in `SMOKE_ARGS` disappeared |
 | `test_every_listed_tool_has_smoke_args` | **fails when someone adds a tool without registering it in `SMOKE_ARGS`** – the prompt to add tests |
-| `test_tool_metadata_is_llm_friendly` (×20) | docstring ≥ 20 chars, valid object schema, required ⊆ properties |
-| `test_tool_call_succeeds` (×20) | call with valid args returns no MCP error and non-empty output |
-| `test_tool_returns_valid_json_without_nan` (×19) | output parses as JSON; no bare `NaN` (`count_facilities` returns a plain number and is excluded) |
+| `test_tool_metadata_is_llm_friendly` (×22) | docstring ≥ 20 chars, valid object schema, required ⊆ properties |
+| `test_tool_call_succeeds` (×22) | call with valid args returns no MCP error and non-empty output |
+| `test_tool_returns_valid_json_without_nan` (×21) | output parses as JSON; no bare `NaN` (`count_facilities` returns a plain number and is excluded) |
 | `test_umlauts_are_not_escaped` | `ensure_ascii=False` works end-to-end |
 | `test_missing_required_argument_is_an_error` | error names the missing argument |
 | `test_wrong_argument_type_is_an_error` | wrong type rejected |
+| `test_explain_provenance_input_errors_reach_the_model` | a foreign IRI or unknown field is an MCP error whose text says what is wrong (raised as `ToolError`: mcp 2.x hides other exception messages) |
 | `test_unknown_tool_is_an_error` | unknown tool → error |
 | `test_server_starts_over_stdio` | `python server.py` starts and completes the MCP handshake |
 
@@ -352,6 +386,10 @@ the server is switched to for one call).
 | `test_e2e_search_service_candidates_paging_covers_every_match` | "Beratung" in pages of 7: every matching service exactly once, `next_offset` ends with `None` |
 | `test_e2e_search_directory_matches_facility_service_or_address_text` | "Schuldner" (and "Schuldner Kreuzberg") == facilities with the term(s) in their own text, address or a linked service |
 | `test_e2e_search_directory_telephone_filter_and_summaries_cover_all_matches` | "Beratung": `missing_counts` cover all matches, not the page; `has_telephone` keeps exactly the graph's facilities with a phone; too-short query → error |
+| `test_e2e_explain_provenance_attributes_each_value_to_its_source_records` | on a TriG snippet with the pipeline graphs: source records == the entity's `cdp:hasMember`; per phone and opening-hours value, the sources == the labels of the records carrying it; `in_directory` == the finished directory's values |
+| `test_e2e_explain_provenance_finds_entries_by_name_and_rejects_foreign_iris` | an upper-cased exact name finds the one facility of that name (no sources: directory.ttl has no pipeline graphs); "Jugend" returns candidates from the facilities whose name contains it; a foreign IRI is an MCP error that says why |
+| `test_e2e_list_sources_counts_records_and_coverage_from_the_graphs` | on the TriG snippet: records per source == `cdp:fromSource` counts in `mapped.ttl`, coverage == `cdp:coverageLabel`, every source has a harvest time |
+| `test_e2e_list_sources_without_pipeline_graphs_is_empty_with_notes` | on directory.ttl (no pipeline graphs): no sources, but the reading notes are there |
 | `test_e2e_find_help_prompt_is_listed_and_renders` | `find_help` is listed with optional `situation`/`location`, renders with the inputs and tool names, has no unfilled placeholders, and says "not given yet" without inputs |
 | `test_e2e_find_help_prompt_only_uses_tools_and_arguments_that_exist` | the tools, `find_nearby` arguments and `source_url` field the prompt names all exist on the server |
 | `test_find_help_prompt_is_listed_and_renders` | `find_help` is listed with optional `situation`/`location`, renders with the inputs and tool names, has no unfilled placeholders, and says "not given yet" without inputs |
@@ -392,7 +430,7 @@ in Python).
 | `test_check_completeness_consistent` | rows == dataset sizes; IRI never missing; cells and missing counts add up; percentages 0–100 |
 | `test_generate_statistics_consistent` | with + without address/provider == facility total; Berlin in `facilities_by_city` == `count_facilities`; per-provider and per-category sums are plausible |
 | `test_compare_facilities_equals_two_detail_lookups` | both sides == `get_facility_details` for each name, both non-empty |
-| `test_mcp_tool_returns_client_result` (×17) | every tool called over MCP returns exactly what `SparqlClient` returns (JSON round trip) |
+| `test_mcp_tool_returns_client_result` (×19) | every tool called over MCP returns exactly what `SparqlClient` returns (JSON round trip) |
 | `test_postal_code_origin_is_where_the_postal_code_is` | 10115 resolves to central Berlin |
 | `test_find_nearby_matches_independent_distance_check` (×2) | 10115 (1 km) and central Munich (1.5 km): result count == facilities within the radius from a plain coordinate query with distances in Python; results nearest first |
 | `test_find_nearby_query_only_narrows` | `query="Sucht"` finds some but not more than without a query |
@@ -404,6 +442,13 @@ in Python).
 | `test_service_candidates_follow_links_to_existing_offices` | the linked office of a Suchtberatung service opens as a card of the reported type |
 | `test_directory_telephone_filter_partitions_the_matches` | with + without phone == all; missing phone count == "without" total; provider counts add up |
 | `test_directory_more_terms_only_narrow` | "Schuldner Kreuzberg" ⊆ "Schuldner"; every hit matched both terms |
+| `test_explain_provenance_sources_match_reference` | for a facility with records from 2+ sources (picked live), the source records equal the reference "sources-of" query (`list_source_records_by_iri.rq`) |
+| `test_explain_provenance_values_are_consistent` | every value has a source or is in the directory; every source named per value is one of the entry's sources; status matches the number of sources |
+| `test_explain_provenance_telephones_match_facility_details` | the phone numbers marked `in_directory` are exactly those `get_facility_details` returns for the same IRI |
+| `test_explain_provenance_shows_inherited_homepage` | Drehscheibe's homepage is `not_from_own_sources`, inherited from its SPI Träger via an AWO record |
+| `test_explain_provenance_resolves_exact_name` | the exact name "Drehscheibe Kinder - und Jugendpolitik" resolves to org-00416a783a9b |
+| `test_explain_provenance_quote_in_name_matches_nothing` | an injection-style name (quotes and SPARQL OR operators) returns no candidates |
+| `test_list_sources_live` | Caritas, DHS, Sozialplattform and AWO are listed, each with records and a harvest time |
 
 ## Layer 4 – Connection smoke (`tests/llm/test_connection.py`)
 | Test | Checks |
@@ -455,6 +500,8 @@ tool call is scored.
 | `get_entity_card` | `entity-card-by-iri`, `entity-card-service-to-office` | German; a service IRI whose office must be followed (answer names Frauenladen) |
 | `search_service_candidates` | `service-candidates-with-office`, `service-candidates-senioren-german` | German; matches the audience/category "Senioren" |
 | `search_directory` | `directory-count-with-phone`, `directory-sucht-with-phone-german` | German; optional `has_telephone=true` filter |
+| `explain_provenance` | `provenance-phone`, `provenance-opening-hours-german` | German; an entry ID instead of a name and the optional `field="opening_hours"` |
+| `list_sources` | `sources`, `sources-awo-coverage-german` | German question about one source's coverage; answer must name "Berlin-Mitte" |
 
 `tests/evals/test_cases.py` checks the cases **offline** (no LLM, runs in CI with layers 1+2):
 

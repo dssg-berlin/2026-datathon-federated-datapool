@@ -1,0 +1,17 @@
+# List up to 5 facilities whose source records come from at least two different sources,
+# most sources first (the endpoint's "multi-source-entities" example).
+# Params: none
+# Used by: tests/api/test_sparql.py (picks a live facility for the explain_provenance tests,
+#          because entity IRIs can change between directory snapshots)
+PREFIX org: <http://www.w3.org/ns/org#>
+PREFIX cdp: <https://civic-data.de/pipeline#>
+
+SELECT ?facility (COUNT(DISTINCT ?source) AS ?sources) WHERE {
+    ?facility a org:OrganizationalUnit .
+    GRAPH <urn:directory:data/pipeline/matches.ttl> { ?facility cdp:hasMember ?record }
+    GRAPH <urn:directory:data/pipeline/mapped.ttl> { ?record cdp:fromSource ?source }
+}
+GROUP BY ?facility
+HAVING (COUNT(DISTINCT ?source) >= 2)
+ORDER BY DESC(?sources) ?facility
+LIMIT 5

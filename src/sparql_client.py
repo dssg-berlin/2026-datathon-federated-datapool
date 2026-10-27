@@ -114,6 +114,53 @@ DATASETS = {
     },
 }
 
+# Fields explain_provenance can explain: name in the answer -> property.
+PROVENANCE_FIELDS = {
+    "name": "schema:name",
+    "alternate_name": "schema:alternateName",
+    "telephone": "schema:telephone",
+    "email": "schema:email",
+    "homepage": "foaf:homepage",
+    "opening_hours": "schema:openingHours",
+    "detail_page": "schema:mainEntityOfPage",
+    "category": "schema:category",
+    "audience": "schema:audience",
+    "accessibility": "schema:accessibilitySummary",
+    "area_served": "schema:areaServed",
+    "street": "schema:streetAddress",
+    "postal_code": "schema:postalCode",
+    "city": "schema:addressLocality",
+    "description": "schema:description",
+    "services": "schema:availableService",
+}
+
+# Long free text: only explained when asked for by name, to keep answers short.
+LONG_TEXT_FIELDS = {"description", "services"}
+
+# A directory entity IRI, or its local ID such as "org-00416a783a9b".
+ENTITY_IRI = re.compile(r"https://civic-data\.de/federated-directory#[A-Za-z0-9_-]+")
+ENTITY_ID = re.compile(r"(?:org|service|traeger|addr)-[0-9a-f]+")
+
+PROVENANCE_LIMITS = [
+    "Sources are the records the directory pipeline harvested for this entry (list_sources "
+    "has the harvest dates). Values are shown as harvested, not checked as current.",
+    "A value without sources was not supplied as-is by this entry's own records: it may be "
+    "inherited from a parent organisation (inherited_from), corrected, combined or geocoded. "
+    "No source found does not mean the value has no origin.",
+    "Several sources describing one entry do not confirm every value, and a match between "
+    "records can be wrong.",
+]
+
+SOURCE_NOTES = [
+    "source_records counts every mapped record of a source: facilities, services, "
+    "addresses and organisations.",
+    "harvested_at is when the pipeline fetched the source. For a static file it is when the "
+    "file was copied, and static_file_committed_at is its repository date; neither proves "
+    "when the contents were collected.",
+    "Coverage is the area a source declares, not a promise of completeness: no result in an "
+    "area does not mean that no support exists there.",
+]
+
 
 # Help needs for find_social_help: need -> German search terms (casefolded). The LLM maps the
 # user's request, in any language, to one of these keys; the terms are matched in the German
@@ -438,6 +485,28 @@ def accessibility_flag(summary: str | None) -> bool | None:
 
     if "barrierefrei" in text:
         return True
+def entity_iri(text: str) -> str | None:
+    """
+    Full directory IRI for an entity IRI or local ID ("org-00416a783a9b").
+
+    None means the text is not an IRI (it is a name). Other IRI-like text raises
+    ValueError, so it never reaches a query.
+    """
+
+    text = text.strip()
+
+    if ENTITY_IRI.fullmatch(text):
+        return text
+
+    local = text.removeprefix("cdf:")
+    if ENTITY_ID.fullmatch(local):
+        return NAMESPACES["cdf:"] + local
+
+    if re.match(r"[a-z][a-z0-9+.-]*://|cdf:", text, re.IGNORECASE):
+        raise ValueError(
+            f"{text!r} is not a directory IRI: expected "
+            "https://civic-data.de/federated-directory#<id> or an ID such as org-00416a783a9b"
+        )
 
     return None
 
@@ -531,6 +600,27 @@ def rank_by_order(rows: list[dict], order: str) -> list[dict]:
         ranked.sort(key=lambda row: (row["facilities_per_10k_inhabitants"], -row["inhabitants"]))
 
     return ranked
+def provenance_status(values: list[dict]) -> str:
+    """How the sources of one field relate to each other (status in explain_provenance)."""
+
+    by_source = {}
+    for value in values:
+        for source in value["sources"]:
+            by_source.setdefault(source, set()).add(value["value"])
+
+    if not by_source:
+        return "not_from_own_sources"
+    if len(by_source) == 1:
+        return "single_source"
+    if len({frozenset(supplied) for supplied in by_source.values()}) == 1:
+        return "sources_agree"
+    return "sources_differ"
+
+
+def same_ignoring_case(values: list[str]) -> bool:
+    """True when the values only differ in upper/lower case or spacing."""
+
+    return len({" ".join(value.casefold().split()) for value in values}) == 1
 
 
 def load_query(query_name: str, /, **params: str) -> str:
@@ -1592,4 +1682,175 @@ class SparqlClient:
             "by_provider": sorted(by_provider.values(), key=lambda entry: -entry["count"]),
             "phone_format_counts": phone_counts,
             "phone_format_verification": "unverified_syntax_only",
+        }
+
+    def facility_matches(self, name: str) -> list[dict]:
+        """Facilities whose name equals `name` (any case), or else contains it; at most 11."""
+
+        rows = self.select("list_facilities_by_name", name=name.strip().casefold())
+
+        return [row for row in rows if row["exact"] == "1"] or rows
+
+    def explain_provenance(self, facility: str, field: str | None = None) -> dict:
+        """
+        Explain where the values of one directory entry come from.
+
+        `facility` is an entity IRI or ID, or a facility name that must match exactly one
+        facility (otherwise the candidates are returned). Every value of a field is listed
+        with the sources whose records supplied it and whether the directory kept it.
+        """
+
+        if not facility.strip():
+            raise ValueError("facility must be a facility name, IRI or ID")
+
+        if field is not None and field not in PROVENANCE_FIELDS:
+            raise ValueError(f"unknown field {field!r}: use one of {list(PROVENANCE_FIELDS)}")
+
+        iri = entity_iri(facility)
+
+        if iri is None:
+            matches = self.facility_matches(facility)
+
+            if len(matches) != 1:
+                return {
+                    "found": False,
+                    "query": facility,
+                    "candidates": [
+                        {
+                            "iri": row["facility"],
+                            "name": row["name"],
+                            "alternate_name": row["alternate_name"],
+                            "street": row["street"],
+                            "city": row["city"],
+                        }
+                        for row in matches[:10]
+                    ],
+                    "more_candidates": len(matches) > 10,
+                    "hint": "Several facilities match: call again with one candidate's iri."
+                    if matches else "No facility name contains this text.",
+                }
+
+            iri = matches[0]["facility"]
+
+        directory = self.select("list_directory_values_by_iri", iri=iri)
+
+        if not directory:
+            return {
+                "found": False,
+                "query": facility,
+                "iri": iri,
+                "hint": "No directory entry has this IRI. IRIs can change between "
+                "directory snapshots: search for the facility by name instead.",
+            }
+
+        wanted = [field] if field else [
+            name for name in PROVENANCE_FIELDS if name not in LONG_TEXT_FIELDS
+        ]
+        field_of = {expand(PROVENANCE_FIELDS[name]): name for name in wanted}
+        values = {name: {} for name in wanted}  # field -> value -> what we know about it
+
+        for row in directory:
+            name = field_of.get(row["predicate"])
+            if name is None or row["value"] is None:
+                continue
+
+            value = values[name].setdefault(
+                row["value"], {"value": row["value"], "in_directory": True, "sources": []}
+            )
+
+            if row["traced"] != "true" and "inherited_from" not in value:
+                value["inherited_from"] = {
+                    "iri": row["parent"],
+                    "name": row["parent_name"],
+                    "source": row["parent_source_label"],
+                    "record": row["parent_record"],
+                } if row["parent_record"] else None
+
+        records = {}
+
+        for row in self.select("list_value_sources_by_iri", iri=iri):
+            source = row["source_label"] or row["source"]
+            record = records.setdefault(row["record"], {
+                "source": source,
+                "record": row["record"],
+                "record_name": None,
+                "detail_page": None,
+            })
+
+            if row["predicate"] == expand("schema:name"):
+                record["record_name"] = record["record_name"] or row["value"]
+            if row["predicate"] == expand("schema:mainEntityOfPage"):
+                record["detail_page"] = record["detail_page"] or row["value"]
+
+            name = field_of.get(row["predicate"])
+            if name is None or row["value"] is None:
+                continue
+
+            value = values[name].setdefault(
+                row["value"], {"value": row["value"], "in_directory": False, "sources": []}
+            )
+            if source not in value["sources"]:
+                value["sources"].append(source)
+
+        fields = []
+
+        for name in wanted:
+            items = sorted(
+                values[name].values(),
+                key=lambda value: (not value["in_directory"], -len(value["sources"]), value["value"]),
+            )
+
+            if not items:
+                if field:
+                    fields.append({"field": name, "status": "no_value", "values": []})
+                continue
+
+            for value in items:
+                value["sources"].sort()
+
+            result = {"field": name, "status": provenance_status(items), "values": items}
+
+            if result["status"] == "sources_differ":
+                result["differs_only_in_case"] = same_ignoring_case(
+                    [value["value"] for value in items if value["sources"]]
+                )
+
+            fields.append(result)
+
+        types = {expand(prefixed): name for prefixed, name in ENTITY_TYPES.items()}
+
+        return {
+            "found": True,
+            "iri": iri,
+            "type": next((types[row["type"]] for row in directory if row["type"] in types), None),
+            "name": next(
+                (row["value"] for row in directory if row["predicate"] == expand("schema:name")),
+                None,
+            ),
+            "sources": sorted(records.values(), key=lambda record: (record["source"], record["record"])),
+            "fields": fields,
+            "limits": PROVENANCE_LIMITS,
+        }
+
+    def list_sources(self) -> dict:
+        """List the federated sources with coverage, record counts and harvest dates."""
+
+        latest = {}
+
+        for row in self.select("list_sources"):
+            # One row per harvest observation, oldest first: the newest one wins.
+            latest[row["source"]] = row
+
+        return {
+            "sources": [
+                {
+                    "source": row["label"],
+                    "coverage": row["coverage"],
+                    "source_records": int(row["records"]),
+                    "harvested_at": row["fetched_at"],
+                    "static_file_committed_at": row["static_committed_at"],
+                }
+                for row in latest.values()
+            ],
+            "notes": SOURCE_NOTES,
         }

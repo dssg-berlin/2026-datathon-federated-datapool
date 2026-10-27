@@ -44,7 +44,8 @@ Named graphs hold the pipeline behind the directory (`urn:directory:data/pipelin
   `REGEX`, `CONTAINS`, `LCASE`, `OPTIONAL`, `GRAPH`.
 * Counting, listing and joining facilities ↔ addresses ↔ services across all providers.
 * Geographic queries via the `schema:latitude` / `schema:longitude` literals (bounding-box `FILTER`s).
-* Provenance: which source a record came from (named graphs).
+* Provenance: which source a record came from (named graphs, used by `explain_provenance`
+  and `list_sources`, see "Provenance: the named graphs" below).
 
 ### What is not possible / limitations
 
@@ -187,6 +188,34 @@ of dropped. `search_directory` sends only its longest term to SPARQL
 (`list_directory_facilities_by_term.rq`); every other term, the provider filter, the
 telephone filter, paging and the summaries over all matches are applied in Python. It
 needs one term of at least 3 characters so it never scans the whole directory.
+| `list_facilities_by_name.rq` | up to 11 facilities whose name contains the text, exact matches first | `explain_provenance` (name lookup) |
+| `list_directory_values_by_iri.rq` | an entity's literal values in the directory, whether its own source records supply them, and the parent record they may be inherited from | `explain_provenance` |
+| `list_value_sources_by_iri.rq` | the literal values the entity's source records supply, with source label and whether the directory kept them | `explain_provenance` |
+| `list_sources.rq` | sources with label, coverage, record count and harvest observations | `list_sources` |
+| `list_source_records_by_iri.rq` | an entity's source records and their source ("sources-of") | tests only (independent reference) |
+| `list_multi_source_facilities.rq` | up to 5 facilities with records from 2+ sources | tests only (picks a live entity) |
+
+### Provenance: the named graphs
+
+`explain_provenance` and `list_sources` are the only tools that read the named graphs. They
+follow the endpoint's own example queries ("sources-of", "competing-values",
+"source-status"), but without RDF 1.2 triple terms (`<<( … )>>`), so they also run offline
+on rdflib (`tests/helpers.py:load_dataset`).
+
+| Graph | Used for |
+|---|---|
+| `urn:directory:data/pipeline/matches.ttl` | `?entity cdp:hasMember ?record`: the source records merged into an entity |
+| `urn:directory:data/pipeline/mapped.ttl` | each record's `cdp:fromSource` and its values, before merging |
+| `urn:directory:config/federation.ttl` | source labels and declared coverage |
+| `urn:directory:data/ingest/ingest-log.ttl` | harvest times |
+
+A value counts as supplied by a source when one of the entity's records carries exactly
+that RDF term. A directory value that no own record carries was inherited from a parent
+(facility → `schema:parentOrganization`, service → `schema:provider`, reported when a parent
+record carries the same term), or corrected, combined or geocoded (reported without a
+source). The `provenance.ttl` annotations would also explain those cases, but need triple
+terms; they are not used. Entity IRIs can change between snapshots, so the live tests
+pick their entity with `list_multi_source_facilities.rq`.
 
 ### How each tool maps to the old CSV logic
 

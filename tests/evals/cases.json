@@ -245,5 +245,33 @@
     "prompt": "Schreibe mir einen Datenqualitätsbericht für Caritas: was fehlt und was sollten sie verbessern?",
     "expect_tool": "data_quality_report",
     "expect_args": {"organisation": "caritas"}
+  },
+  {
+    "id": "provenance-phone",
+    "prompt": "Which sources list the phone number of the facility \"Caritas-Zentrum Kaiserslautern - Schuldnerberatung\", and do they agree?",
+    "expect_tool": "explain_provenance",
+    "expect_args": {"facility": "Kaiserslautern"},
+    "answer_contains": ["DHS"]
+  },
+  {
+    "id": "provenance-opening-hours-german",
+    "prompt": "Woher stammen die Öffnungszeiten der Einrichtung org-0972c9e82c29, und sind sich die Quellen einig?",
+    "expect_tool": "explain_provenance",
+    "expect_args": {"facility": "org-0972c9e82c29", "field": "opening_hours"},
+    "answer_contains": ["DHS"]
+  },
+  {
+    "id": "sources",
+    "prompt": "Which organisations' data does the directory combine, and when was it last harvested?",
+    "expect_tool": "list_sources",
+    "expect_args": {},
+    "answer_contains": ["Caritas"]
+  },
+  {
+    "id": "sources-awo-coverage-german",
+    "prompt": "Ich finde in München keine AWO-Einrichtungen. Welche Gebiete deckt die AWO in diesem Verzeichnis überhaupt ab?",
+    "expect_tool": "list_sources",
+    "expect_args": {},
+    "answer_contains": ["Berlin-Mitte"]
   }
 ]

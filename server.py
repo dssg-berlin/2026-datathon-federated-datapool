@@ -8,6 +8,7 @@ import json
 import sys
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from src.sparql_client import SparqlClient
 
@@ -639,6 +640,60 @@ E. What the directory doesn't cover, in one line, when it matters for this need
    offer to look for something else or somewhere else.
 
 If nothing fits, say so honestly rather than suggesting unrelated services."""
+
+
+@mcp.tool()
+def explain_provenance(facility: str, field: str | None = None) -> str:
+    """
+    Explain where the values of one directory entry come from: which source
+    organisations' records (Caritas, DHS, Sozialplattform, AWO, Destatis)
+    supplied each value, where the sources disagree, which values the
+    directory kept, and which values were inherited from a parent
+    organisation. Use this when asked where a phone number, email, opening
+    hours or other value comes from, whether the sources agree, which value
+    to trust, or where to verify an entry.
+
+    Args:
+        facility: Facility name (for example "Caritas-Zentrum Kaiserslautern -
+            Schuldnerberatung"), or the iri of a facility, service or provider
+            as returned by other tools (a short ID such as "org-00416a783a9b"
+            also works). If a name matches several facilities, the candidates
+            are returned: call again with one candidate's iri.
+        field: Optional, explain only this field: name, alternate_name,
+            telephone, email, homepage, opening_hours, detail_page, category,
+            audience, accessibility, area_served, street, postal_code, city,
+            description or services. Without it, every field that has a value
+            is explained, except the long texts description and services.
+
+    Returns:
+        JSON with the entry, its source records (with detail pages to verify
+        them) and, per field, a status (single_source, sources_agree,
+        sources_differ or not_from_own_sources) and each value with the
+        sources that supplied it and whether the directory kept it.
+    """
+
+    try:
+        return to_json(sparql.explain_provenance(facility, field))
+    except ValueError as exc:
+        # mcp 2.x shows the model only ToolError messages; other errors stay on the server.
+        raise ToolError(str(exc)) from exc
+
+
+@mcp.tool()
+def list_sources() -> str:
+    """
+    List the organisations whose data the federated directory combines (for
+    example Caritas, DHS, Sozialplattform, AWO, Destatis), with the area each
+    source covers, how many records it contributed and when it was harvested.
+    Use this to explain what the directory covers, why a provider has no
+    entries in a region, or how current the data is.
+
+    Returns:
+        JSON with one entry per source and notes on how to read the counts
+        and dates.
+    """
+
+    return to_json(sparql.list_sources())
 
 
 if __name__ == "__main__":
