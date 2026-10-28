@@ -178,6 +178,30 @@ def load_graph(turtle: str | None = None):
     return graph
 
 
+TRIG_PREFIXES = TTL_PREFIXES + """\
+@prefix cdp: <https://civic-data.de/pipeline#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+"""
+
+
+def load_dataset(trig: str | None = None):
+    """The RDF source as a dataset, for queries that read named graphs (GRAPH <...>).
+
+    rdflib refuses GRAPH on a plain Graph. Triples outside GRAPH blocks form the default
+    graph (the finished directory), GRAPH blocks become named graphs, as on the endpoint.
+    Without a snippet: directory.ttl as the default graph and no named graphs.
+    """
+    import rdflib
+
+    dataset = rdflib.Dataset()
+    if trig is None:
+        dataset.parse(TTL_FILE, format="trig")  # Turtle is valid TriG: all in the default graph
+    else:
+        dataset.parse(data=TRIG_PREFIXES + trig, format="trig")
+    return dataset
+
+
 def graph_to_frames(graph) -> dict:
     """Tables for the old CSV code, derived from the RDF graph.
 

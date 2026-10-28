@@ -1,0 +1,29 @@
+# List the literal values that the source records of one directory entity supply, with
+# their source, and whether each exact value is in the finished directory.
+# Source records are the entity's cluster members (matches graph); their values and source
+# come from the mapped graph. {{iri}} is a full entity IRI, checked in Python
+# (SparqlClient.explain_provenance) and turned into an IRI here, because placeholders may
+# only be string literals. Adapted from the endpoint's "sources-of" / "competing-values"
+# examples (sosuse-directory-builder webapp/content/queries/).
+# Params: {{iri}}
+# Used by: SparqlClient.explain_provenance -> MCP tool explain_provenance
+PREFIX schema: <http://schema.org/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX cdp: <https://civic-data.de/pipeline#>
+
+SELECT ?record ?source ?source_label ?predicate ?value ?in_directory WHERE {
+    BIND(IRI("{{iri}}") AS ?entity)
+    GRAPH <urn:directory:data/pipeline/matches.ttl> {
+        ?entity cdp:hasMember ?record .
+    }
+    GRAPH <urn:directory:data/pipeline/mapped.ttl> {
+        ?record cdp:fromSource ?source ;
+                ?predicate ?value .
+        FILTER(isLiteral(?value))
+    }
+    OPTIONAL {
+        GRAPH <urn:directory:config/federation.ttl> { ?source rdfs:label ?source_label }
+    }
+    BIND(EXISTS { ?entity ?predicate ?value } AS ?in_directory)
+}
+ORDER BY ?predicate ?value ?source ?record

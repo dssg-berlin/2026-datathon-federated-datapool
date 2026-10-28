@@ -75,10 +75,22 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `get_entity_card(iri)` | Every recorded field of a facility, service, provider or address, the missing fields, syntax-only quality notes (e.g. a phone without leading 0) and typed links (service → facility → address/provider) | "What exactly does the directory record for this entry?" |
 | `search_service_candidates(query, limit, offset)` | Services matching name/category/audience, each with the facility or provider that runs it and its postal code and locality; paged | "Which debt counselling services are there, and which office runs each?" |
 | `search_directory(query, provider, has_telephone, limit, offset)` | Facilities where every term matches their own text, address or a linked service; provider and phone filters; paged hits, with totals and missing-field counts over all matches | "How many debt counselling facilities in Kreuzberg have a phone number?" |
+| `explain_provenance(facility, field=None)` | For one entry (name, IRI or ID): its source records with detail pages, and per field which sources supplied each value, whether they agree and which values the directory kept or inherited | "Which sources list this facility's phone number, and do they agree?" |
+| `list_sources()` | The federated sources with declared coverage, record counts and harvest dates | "Which organisations' data is in the directory, and how current is it?" |
 
 Matching is case-insensitive (`GIESSEN` finds `Gießen`). City matches are **exact**, so
 `Berlin` does not include `Berlin-Mitte`. Name and service searches are substring matches.
 
+### Where does a value come from?
+
+The directory merges records from several sources (Caritas, DHS, Sozialplattform, AWO,
+Destatis). `explain_provenance` reads the pipeline's named graphs on the same endpoint and
+shows, per value, which source supplied it. Live example (harvest of 2026-10-06):
+*Caritas-Zentrum Kaiserslautern - Schuldnerberatung* has two phone numbers. `+4963136120222`
+comes from DHS and Sozialplattform, `+4963136120225` from Caritas. DHS and Sozialplattform
+also give different opening hours, and the directory keeps only Sozialplattform's. The
+homepage of *Drehscheibe Kinder - und Jugendpolitik* is not in its own AWO record but
+inherited from its Träger, so it may lead to a head office.
 ## Prompts
 
 | Prompt | What it does |
@@ -162,6 +174,9 @@ evals need a running Open WebUI and are described with everything else in [TEST.
   `detect_duplicates` scan all ~67k entities (5–15 s). There is no paging yet.
 * **Few provider links.** Only a few dozen facilities have a `schema:parentOrganization`,
   so per-provider statistics are thin.
+* **Provenance is limited to what the pipeline records.** Values that were corrected,
+  combined or geocoded have no source record; `explain_provenance` reports them without a
+  source instead of guessing. Entity IRIs can change between directory snapshots.
 
 More on the data model and the endpoint: [QUERIES.md](QUERIES.md).
 

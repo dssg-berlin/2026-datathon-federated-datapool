@@ -37,6 +37,8 @@ SMOKE_ARGS = {
     "get_entity_card": {"iri": "https://civic-data.de/federated-directory#org-34e986356c61"},
     "search_service_candidates": {"query": "Schuldner", "limit": 3},
     "search_directory": {"query": "Schuldner", "has_telephone": True},
+    "explain_provenance": {"facility": "https://civic-data.de/federated-directory#org-00416a783a9b"},
+    "list_sources": {},
 }
 JSON_TOOLS = [t for t in SMOKE_ARGS if t != "count_facilities"]
 
@@ -117,6 +119,16 @@ def test_missing_required_argument_is_an_error():
 def test_wrong_argument_type_is_an_error():
     is_error, text = mcp_call("count_facilities", {"city": {"not": "a string"}})
     assert is_error, f"count_facilities(city=<dict>) should fail but returned: {text[:200]!r}"
+
+
+def test_explain_provenance_input_errors_reach_the_model():
+    is_error, text = mcp_call("explain_provenance", {"facility": "https://example.org/x"})
+    assert is_error, f"a foreign IRI should be an error, got: {text[:200]!r}"
+    assert "not a directory IRI" in text, (
+        f"the error should say what is wrong (mcp 2.x hides non-ToolError messages): {text[:200]!r}"
+    )
+    is_error, text = mcp_call("explain_provenance", {"facility": "org-00416a783a9b", "field": "fax"})
+    assert is_error and "telephone" in text, f"error should list the valid fields: {text[:200]!r}"
 
 
 def test_unknown_tool_is_an_error():
