@@ -46,7 +46,7 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `src/legacy/` | The old pandas/CSV implementation. **Not used by the server.** Kept as the reference that the offline parity tests compare the SPARQL queries against. |
 | `data/directory.ttl` | RDF snapshot of the directory. The offline tests run the real queries on it, so CI needs no network. |
 | `data/*Schema.csv` | The original AWO CSV export. Used only by the tests; its headers define the `DATASETS` columns. |
-| `tests/` | Five test layers (unit, MCP protocol, live API, LLM connection, LLM tool-calling evals) and a live test dashboard. See [TEST.md](TEST.md). |
+| `tests/` | Five test layers (unit, MCP protocol, live API, LLM connection, LLM tool-calling evals) and a live test dashboard. See [TESTS.md](TESTS.md). |
 | `benchmarking/` | LLM benchmark against the real server: multilingual, professional and smoke case suites, an agent loop over MCP, deterministic evaluators, optional rubric judge, tool-profile comparisons and leaderboards. See [benchmarking/README.md](benchmarking/README.md). |
 | `.github/workflows/` | CI: offline tests on every push, live API tests and LLM evals on manual trigger. |
 | `doc/` | Datathon presentations. |
@@ -162,7 +162,7 @@ pytest -m api tests               # every tool against the live endpoint (~1 min
 ```
 
 `pytest` opens a live dashboard in your browser (`--no-dashboard` to turn it off). The LLM
-evals need a running Open WebUI and are described with everything else in [TEST.md](TEST.md).
+evals need a running Open WebUI and are described with everything else in [TESTS.md](TESTS.md).
 
 ## Known limitations
 
