@@ -1,7 +1,7 @@
 name: LLM evals
 
 # Runs the tool-calling evals through Open WebUI. Needs a self-hosted runner that
-# can reach Open WebUI (see TEST.md). Manual trigger only, so forks/PRs can never
+# can reach Open WebUI (see TESTS.md). Manual trigger only, so forks/PRs can never
 # run code on that machine.
 on:
   workflow_dispatch:
