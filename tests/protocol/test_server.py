@@ -7,8 +7,10 @@ When you add a tool, add an entry to SMOKE_ARGS below and two tests to test_tool
 """
 
 import asyncio
+import io
 import json
 import sys
+import urllib.error
 
 import pytest
 
@@ -129,6 +131,54 @@ def test_explain_provenance_input_errors_reach_the_model():
     )
     is_error, text = mcp_call("explain_provenance", {"facility": "org-00416a783a9b", "field": "fax"})
     assert is_error and "telephone" in text, f"error should list the valid fields: {text[:200]!r}"
+
+
+@pytest.fixture
+def failing_endpoint(monkeypatch):
+    """Point the server at a real SparqlClient whose HTTP call fails or answers with `failure`."""
+    import server
+    from src.sparql_client import SparqlClient
+
+    def install(failure):
+        def urlopen(*args, **kwargs):
+            if isinstance(failure, Exception):
+                raise failure
+            return io.BytesIO(failure)
+
+        monkeypatch.setattr(server, "sparql", SparqlClient(timeout=30))
+        monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+    return install
+
+
+@pytest.mark.parametrize(
+    "failure, expected",
+    [
+        (TimeoutError("timed out"), "did not answer within 30 s"),
+        (urllib.error.URLError(TimeoutError("timed out")), "did not answer within 30 s"),
+        (urllib.error.URLError("Name or service not known"), "could not be reached"),
+        (urllib.error.HTTPError("", 503, "Service Unavailable", {}, None), "HTTP 503"),
+        (b"<html>Bad Gateway</html>", "not SPARQL JSON"),
+    ],
+    ids=["read-timeout", "connect-timeout", "unreachable", "http-503", "not-json"],
+)
+def test_endpoint_errors_reach_the_model(failing_endpoint, failure, expected):
+    failing_endpoint(failure)
+    is_error, text = mcp_call("count_facilities", {"city": "Berlin"})
+    assert is_error, f"a failing endpoint should be an MCP error, got: {text[:200]!r}"
+    assert expected in text, (
+        f"the error should say what went wrong (mcp 2.x hides non-ToolError messages): {text[:200]!r}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(SMOKE_ARGS))
+def test_every_tool_reports_endpoint_errors(failing_endpoint, name):
+    failing_endpoint(TimeoutError("timed out"))
+    is_error, text = mcp_call(name, SMOKE_ARGS[name])
+    assert is_error and "did not answer" in text, (
+        f"{name}: an endpoint timeout should reach the model as a ToolError "
+        f"(register the tool with @tool in server.py), got: {text[:200]!r}"
+    )
 
 
 def test_unknown_tool_is_an_error():
