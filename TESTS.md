@@ -326,6 +326,8 @@ the graph's triples (rdflib, not the `.rq` files).
 | `test_missing_required_argument_is_an_error` | error names the missing argument |
 | `test_wrong_argument_type_is_an_error` | wrong type rejected |
 | `test_explain_provenance_input_errors_reach_the_model` | a foreign IRI or unknown field is an MCP error whose text says what is wrong (raised as `ToolError`: mcp 2.x hides other exception messages) |
+| `test_endpoint_errors_reach_the_model` (×5) | a read or connect timeout, an unreachable endpoint, HTTP 503 and a non-JSON answer each reach the model with their reason (`EndpointError` → `ToolError`), not just "Error executing tool" |
+| `test_every_tool_reports_endpoint_errors` (×22) | **fails when a tool is registered with `@mcp.tool()` instead of `@tool`**: an endpoint timeout reaches the model as "did not answer within 30 s" |
 | `test_unknown_tool_is_an_error` | unknown tool → error |
 | `test_server_starts_over_stdio` | `python server.py` starts and completes the MCP handshake |
 
