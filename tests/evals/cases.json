@@ -1,7 +1,7 @@
 [
   {
     "id": "count-berlin",
-    "prompt": "How many AWO facilities are there in Berlin?",
+    "prompt": "How many social facilities are there in Berlin?",
     "expect_tool": "count_facilities",
     "expect_args": {"city": "Berlin"},
     "answer_contains": ["646"]
@@ -14,7 +14,7 @@
   },
   {
     "id": "search-facilities-berlin",
-    "prompt": "List the AWO facilities located in Berlin with their contact info.",
+    "prompt": "List the social facilities located in Berlin with their contact info.",
     "expect_tool": "search_facilities",
     "expect_args": {"city": "Berlin"}
   },
@@ -64,7 +64,7 @@
   },
   {
     "id": "duplicates",
-    "prompt": "Are there any exact duplicate rows in the AWO datasets?",
+    "prompt": "Are there any exact duplicate rows in the directory datasets?",
     "expect_tool": "detect_duplicates",
     "expect_args": {}
   },
@@ -76,7 +76,7 @@
   },
   {
     "id": "completeness",
-    "prompt": "How complete is the AWO data? Which columns have missing values?",
+    "prompt": "How complete is the directory data? Which columns have missing values?",
     "expect_tool": "check_completeness",
     "expect_args": {}
   },
@@ -88,7 +88,7 @@
   },
   {
     "id": "statistics",
-    "prompt": "Give me overall statistics about the AWO datasets.",
+    "prompt": "Give me overall statistics about the directory datasets.",
     "expect_tool": "generate_statistics",
     "expect_args": {}
   },
