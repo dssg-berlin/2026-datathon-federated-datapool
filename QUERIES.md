@@ -249,7 +249,8 @@ runs these queries on `data/directory.ttl` and checks that the results are ident
 
 1. Write the `.rq` file following the naming schema, with the header, and add it to the table above.
 2. Add a `SparqlClient` method that calls `self.select("<query_name>", ...)` and returns a plain value.
-3. Add an `@mcp.tool()` in `server.py` that calls the method, and register it in `SMOKE_ARGS`.
+3. Add a tool in `server.py` that calls the method, registered with `@tool` (not `@mcp.tool()`,
+   so endpoint failures reach the model with their reason), and add it to `SMOKE_ARGS`.
 4. Add offline tests in `tests/unit/` (run the query on `data/directory.ttl` or a small Turtle
    snippet via `LocalSparqlClient(load_graph(...))`), live tests in `tests/api/`, and
    describe them in `TEST.md`.

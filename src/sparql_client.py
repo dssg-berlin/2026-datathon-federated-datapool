@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
@@ -642,6 +643,14 @@ def load_query(query_name: str, /, **params: str) -> str:
     )
 
 
+class EndpointError(Exception):
+    """The SPARQL endpoint timed out, could not be reached or sent an unusable answer.
+
+    The message is written for the end user: it says what went wrong and whether retrying
+    may help.
+    """
+
+
 class SparqlClient:
     """Query the federated directory of social support services over SPARQL."""
 
@@ -652,7 +661,12 @@ class SparqlClient:
         self.timeout = timeout
 
     def query(self, sparql: str) -> dict:
-        """Run a SPARQL query and return the parsed JSON result."""
+        """Run a SPARQL query and return the parsed JSON result.
+
+        Raises:
+            EndpointError: on a timeout, a network or HTTP error, or a response that is
+                not JSON.
+        """
 
         url = self.endpoint + "?" + urllib.parse.urlencode({"query": sparql})
         request = urllib.request.Request(
@@ -660,8 +674,33 @@ class SparqlClient:
             headers={"Accept": "application/sparql-results+json"},
         )
 
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.load(response)
+        timed_out = (
+            f"The directory endpoint did not answer within {self.timeout:g} s. "
+            "Please try again in a moment."
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            retry = " Please try again later." if exc.code == 429 or exc.code >= 500 else ""
+            raise EndpointError(
+                f"The directory endpoint answered with HTTP {exc.code} ({exc.reason}).{retry}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            # A timeout while connecting arrives wrapped in URLError, one while reading as is.
+            if isinstance(exc.reason, TimeoutError):
+                raise EndpointError(timed_out) from exc
+            raise EndpointError(
+                f"The directory endpoint could not be reached ({exc.reason}). "
+                "Please try again later."
+            ) from exc
+        except TimeoutError as exc:
+            raise EndpointError(timed_out) from exc
+        except json.JSONDecodeError as exc:
+            raise EndpointError(
+                "The directory endpoint sent a response that is not SPARQL JSON. "
+                "Please try again later."
+            ) from exc
 
     def select(self, query_name: str, /, **params: str) -> list[dict]:
         """Run sparql_queries/<query_name>.rq and return its rows."""
