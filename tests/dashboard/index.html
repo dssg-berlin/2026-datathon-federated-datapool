@@ -186,7 +186,7 @@ function expectedPanel(t) {
     p.append(kv("Prompt", e.prompt), kv("Tool", h("code", {}, e.tool)), kv("Arguments", h("code", {}, JSON.stringify(e.args))));
     if (e.answer_contains.length) p.append(kv("Answer has", h("code", {}, JSON.stringify(e.answer_contains))));
   }
-  if (!t.expected && !e) p.append(h("span", { class: "muted" }, "No description in TEST.md yet."));
+  if (!t.expected && !e) p.append(h("span", { class: "muted" }, "No description in TESTS.md yet."));
   if (t.skip_reason) p.append(kv(t.status === "xfailed" ? "Known issue" : "Reason", t.skip_reason));
   return p;
 }
