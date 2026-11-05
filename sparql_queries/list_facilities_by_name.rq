@@ -1,0 +1,32 @@
+# List up to 11 facilities whose name contains the given text, exact name matches first.
+# Match: case-insensitive. {{name}} must already be casefolded; the data side is lower-cased
+# with ß -> ss (same as list_facility_details_by_name.rq). ?exact is 1 when the whole name
+# equals {{name}}. The fixed LIMIT lets the caller tell "one match" from "several" without
+# fetching thousands of rows for short names. Alternate name and street help tell apart
+# facilities that share a name (e.g. departments of one Caritas centre).
+# Params: {{name}}
+# Used by: SparqlClient.explain_provenance -> MCP tool explain_provenance
+PREFIX schema: <http://schema.org/>
+PREFIX org: <http://www.w3.org/ns/org#>
+
+SELECT ?facility
+       (SAMPLE(?name_) AS ?name)
+       (SAMPLE(?alternate_name_) AS ?alternate_name)
+       (SAMPLE(?street_) AS ?street)
+       (SAMPLE(?city_) AS ?city)
+       (MAX(IF(REPLACE(LCASE(STR(?name_)), "ß", "ss") = "{{name}}", 1, 0)) AS ?exact)
+WHERE {
+    ?facility a org:OrganizationalUnit ;
+              schema:name ?name_ .
+    FILTER(CONTAINS(REPLACE(LCASE(STR(?name_)), "ß", "ss"), "{{name}}"))
+    OPTIONAL { ?facility schema:alternateName ?alternate_name_ }
+    OPTIONAL {
+        ?facility schema:address ?address .
+        ?address a schema:PostalAddress .
+        OPTIONAL { ?address schema:streetAddress ?street_ }
+        OPTIONAL { ?address schema:addressLocality ?city_ }
+    }
+}
+GROUP BY ?facility
+ORDER BY DESC(?exact) ?facility
+LIMIT 11

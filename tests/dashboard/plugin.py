@@ -5,7 +5,7 @@ test progress, expected results and actual results to it. When the run ends a
 standalone snapshot is written to reports/dashboard.html.
 
 Disable with --no-dashboard (or env NO_DASHBOARD=1; automatically off when CI is set).
-Expected results come from the table rows in TEST.md and, for evals, the case in
+Expected results come from the table rows in TESTS.md and, for evals, the case in
 cases.json. Actual results come from the assertions pytest evaluates (needs
 enable_assertion_pass_hook in pytest.ini) and from structured eval records.
 """
@@ -50,8 +50,8 @@ def _humanize(name: str) -> str:
 
 
 def _expected_from_testmd() -> dict:
-    """Map test function name -> description, from the tables in TEST.md."""
-    path = ROOT / "TEST.md"
+    """Map test function name -> description, from the tables in TESTS.md."""
+    path = ROOT / "TESTS.md"
     result = {}
     if not path.exists():
         return result

@@ -1,0 +1,30 @@
+# List the sources federated into the directory: label, declared coverage, number of
+# source records (all entity types) and harvest observations. A static file's fetch time is
+# when it was copied, ?static_committed_at its repository date; neither proves when its
+# contents were collected. Adapted from the endpoint's "source-status" example.
+# Params: none
+# Used by: SparqlClient.list_sources -> MCP tool list_sources
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+PREFIX cdp: <https://civic-data.de/pipeline#>
+
+SELECT ?source ?label ?coverage ?records ?fetched_at ?static_committed_at WHERE {
+    {
+        SELECT ?source (COUNT(DISTINCT ?record) AS ?records) WHERE {
+            GRAPH <urn:directory:data/pipeline/mapped.ttl> { ?record cdp:fromSource ?source }
+        }
+        GROUP BY ?source
+    }
+    GRAPH <urn:directory:config/federation.ttl> {
+        ?source rdfs:label ?label .
+        OPTIONAL { ?source cdp:coverageLabel ?coverage }
+    }
+    OPTIONAL {
+        GRAPH <urn:directory:data/ingest/ingest-log.ttl> {
+            ?observation cdp:ofSource ?source ;
+                         prov:atTime ?fetched_at .
+            OPTIONAL { ?observation cdp:staticCommittedAt ?static_committed_at }
+        }
+    }
+}
+ORDER BY ?label ?fetched_at

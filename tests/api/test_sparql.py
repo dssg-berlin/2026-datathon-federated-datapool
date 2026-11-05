@@ -189,6 +189,95 @@ def test_compare_facilities_equals_two_detail_lookups(client):
     assert all(side["matches"] for side in result)
 
 
+# ---- live: provenance (named graphs) -----------------------------------------------
+
+DREHSCHEIBE = "https://civic-data.de/federated-directory#org-00416a783a9b"
+
+
+@pytest.fixture(scope="module")
+def multi_source_facility(client):
+    """A facility described by records from several sources (IRIs change between snapshots)."""
+    rows = client.select("list_multi_source_facilities")
+    assert rows, f"sanity: no facility with records from 2+ sources on {client.endpoint}"
+    return rows[0]["facility"]
+
+
+@pytest.fixture(scope="module")
+def provenance(client, multi_source_facility):
+    return client.explain_provenance(multi_source_facility)
+
+
+def test_explain_provenance_sources_match_reference(client, multi_source_facility, provenance):
+    reference = {
+        row["record"]
+        for row in client.select("list_source_records_by_iri", iri=multi_source_facility)
+    }
+    assert provenance["found"] is True
+    assert {s["record"] for s in provenance["sources"]} == reference, (
+        f"explain_provenance({multi_source_facility}) lists other source records than sources-of"
+    )
+    assert len({s["source"] for s in provenance["sources"]}) >= 2
+
+
+def test_explain_provenance_values_are_consistent(provenance):
+    sources = {s["source"] for s in provenance["sources"]}
+    for field in provenance["fields"]:
+        supplied = {source for value in field["values"] for source in value["sources"]}
+        assert supplied <= sources, (field["field"], supplied - sources)
+        for value in field["values"]:
+            assert value["sources"] or value["in_directory"], (
+                f"{field['field']}: {value['value']!r} has neither a source nor a directory entry"
+            )
+        if not supplied:
+            assert field["status"] == "not_from_own_sources", field
+        elif len(supplied) == 1:
+            assert field["status"] == "single_source", field
+        else:
+            assert field["status"] in {"sources_agree", "sources_differ"}, field
+
+
+def test_explain_provenance_telephones_match_facility_details(client, provenance):
+    """The kept phone numbers are the ones get_facility_details shows (another query)."""
+    details = {d["iri"]: d for d in client.get_facility_details(provenance["name"])}
+    telephone = details[provenance["iri"]]["telephone"]
+    kept = {
+        value["value"]
+        for field in provenance["fields"] if field["field"] == "telephone"
+        for value in field["values"] if value["in_directory"]
+    }
+    assert kept == (set(telephone.split("; ")) if telephone else set())
+
+
+def test_explain_provenance_shows_inherited_homepage(client):
+    result = client.explain_provenance(DREHSCHEIBE, field="homepage")
+    assert result["found"] is True
+    [homepage] = result["fields"]
+    assert homepage["status"] == "not_from_own_sources", homepage
+    [value] = homepage["values"]
+    inherited = value["inherited_from"]
+    assert inherited, f"homepage {value['value']!r} of {DREHSCHEIBE} has no inherited_from"
+    assert inherited["name"].startswith("SPI") and "AWO" in inherited["source"], inherited
+
+
+def test_explain_provenance_resolves_exact_name(client):
+    result = client.explain_provenance("Drehscheibe Kinder - und Jugendpolitik")
+    assert result["iri"] == DREHSCHEIBE
+
+
+def test_explain_provenance_quote_in_name_matches_nothing(client):
+    result = client.explain_provenance('x") || true || ("')
+    assert result["found"] is False and result["candidates"] == []
+
+
+def test_list_sources_live(client):
+    sources = client.list_sources()["sources"]
+    labels = {s["source"] for s in sources}
+    assert {"Caritas", "Sozialplattform"} <= labels, labels
+    assert any("DHS" in label for label in labels) and any("AWO" in label for label in labels)
+    for source in sources:
+        assert source["source_records"] > 0 and source["harvested_at"], source
+
+
 # ---- live: MCP server returns exactly what the client returns ----------------------
 
 MCP_CASES = {
@@ -229,6 +318,8 @@ MCP_CASES = {
         {"level": "region", "order": "lowest_per_10k", "postal_code_prefix": "", "limit": 5},
         "facilities_per_inhabitant_by_region", ("region", "lowest_per_10k", "", 5, 10_000),
     ),
+    "explain_provenance": ({"facility": DREHSCHEIBE}, "explain_provenance", (DREHSCHEIBE,)),
+    "list_sources": ({}, "list_sources", ()),
 }
 
 

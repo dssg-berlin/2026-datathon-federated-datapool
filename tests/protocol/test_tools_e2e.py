@@ -15,15 +15,16 @@ from contextlib import contextmanager
 
 import pytest
 from rdflib import Namespace, URIRef
-from rdflib.namespace import RDF
+from rdflib.graph import DATASET_DEFAULT_GRAPH_ID
+from rdflib.namespace import RDF, RDFS
 
 from conftest import DATA_DIR
 from src.fix_first import decode_source_link
 from src.quality_report import UNKNOWN_ORIGIN
 from src.sparql_client import DATASETS, HELP_NEEDS, expand, haversine_km
 from tests.helpers import (
-    LocalSparqlClient, load_graph, mcp_call, mcp_call_once, mcp_get_prompt, mcp_list_prompts,
-    mcp_list_tools,
+    LocalSparqlClient, load_dataset, load_graph, mcp_call, mcp_call_once, mcp_get_prompt,
+    mcp_list_prompts, mcp_list_tools,
 )
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -92,6 +93,19 @@ def serving(turtle):
 
     previous = server.sparql
     server.sparql = LocalSparqlClient(load_graph(turtle))
+    try:
+        yield
+    finally:
+        server.sparql = previous
+
+
+@contextmanager
+def serving_named_graphs(trig):
+    """Like serving, for a TriG snippet with named graphs (the provenance tools read them)."""
+    import server
+
+    previous = server.sparql
+    server.sparql = LocalSparqlClient(load_dataset(trig))
     try:
         yield
     finally:
@@ -764,6 +778,117 @@ def test_e2e_search_directory_telephone_filter_and_summaries_cover_all_matches(g
     assert all(hit["telephone"] for hit in filtered["hits"])
     short = call_json("search_directory", {"query": "ab"}, once=False)
     assert short["status"] == "error", "a query without a 3+ character term must be rejected"
+
+
+# ---- explain_provenance and list_sources (named graphs) ------------------------------
+#
+# directory.ttl has no pipeline graphs, so these tests serve a small TriG snippet shaped
+# like the endpoint's graphs and read the expected values straight from those graphs.
+
+CDP = Namespace("https://civic-data.de/pipeline#")
+MATCHES = URIRef("urn:directory:data/pipeline/matches.ttl")
+MAPPED = URIRef("urn:directory:data/pipeline/mapped.ttl")
+FEDERATION = URIRef("urn:directory:config/federation.ttl")
+
+PIPELINE = """
+cdf:org-p1 a org:OrganizationalUnit ;
+    schema:name "Beratung Ost" ;
+    schema:telephone "+49 30 1", "+49 30 2" ;
+    schema:openingHours "Mo 9-12" .
+
+GRAPH <urn:directory:data/pipeline/matches.ttl> {
+    cdf:org-p1 cdp:hasMember cdp:a-1, cdp:b-1 .
+}
+GRAPH <urn:directory:data/pipeline/mapped.ttl> {
+    cdp:a-1 cdp:fromSource cdp:aSource ; schema:name "Beratung Ost" ;
+        schema:telephone "+49 30 1" ; schema:openingHours "Mo 9-17" .
+    cdp:b-1 cdp:fromSource cdp:bSource ; schema:name "Beratung Ost" ;
+        schema:telephone "+49 30 2" ; schema:openingHours "Mo 9-12" .
+    cdp:b-2 cdp:fromSource cdp:bSource ; schema:name "Anderer Eintrag" .
+}
+GRAPH <urn:directory:config/federation.ttl> {
+    cdp:aSource rdfs:label "Quelle A" ; cdp:coverageLabel "Berlin" .
+    cdp:bSource rdfs:label "Quelle B" ; cdp:coverageLabel "Germany" .
+}
+GRAPH <urn:directory:data/ingest/ingest-log.ttl> {
+    cdp:obs-a cdp:ofSource cdp:aSource ; prov:atTime "2026-10-06T05:00:00Z" .
+    cdp:obs-b cdp:ofSource cdp:bSource ; prov:atTime "2026-10-06T06:00:00Z" .
+}
+"""
+
+
+def supplied_by(dataset, entity, predicate):
+    """value -> labels of the sources whose records (members of the entity) carry it."""
+    matches, mapped, federation = (dataset.graph(g) for g in (MATCHES, MAPPED, FEDERATION))
+    result = {}
+    for record in matches.objects(URIRef(entity), CDP.hasMember):
+        label = str(federation.value(mapped.value(record, CDP.fromSource), RDFS.label))
+        for found in mapped.objects(record, predicate):
+            result.setdefault(str(found), set()).add(label)
+    return result
+
+
+def test_e2e_explain_provenance_attributes_each_value_to_its_source_records():
+    dataset = load_dataset(PIPELINE)
+    directory = dataset.graph(DATASET_DEFAULT_GRAPH_ID)
+    entity = CDF + "org-p1"
+    with serving_named_graphs(PIPELINE):
+        result = call_json("explain_provenance", {"facility": entity}, once=False)
+
+    assert {s["record"] for s in result["sources"]} == {
+        str(record) for record in dataset.graph(MATCHES).objects(URIRef(entity), CDP.hasMember)
+    }
+    fields = {f["field"]: f for f in result["fields"]}
+    for name, predicate in [("telephone", SCHEMA.telephone), ("opening_hours", SCHEMA.openingHours)]:
+        values = fields[name]["values"]
+        assert {v["value"]: set(v["sources"]) for v in values} == supplied_by(dataset, entity, predicate), name
+        assert {v["value"] for v in values if v["in_directory"]} == {
+            str(found) for found in directory.objects(URIRef(entity), predicate)
+        }, f"{name}: in_directory must match the finished directory"
+        assert fields[name]["status"] == "sources_differ", fields[name]
+    assert fields["name"]["status"] == "sources_agree", fields["name"]
+
+
+def test_e2e_explain_provenance_finds_entries_by_name_and_rejects_foreign_iris(graph):
+    name = "Drehscheibe Kinder - und Jugendpolitik"
+    named = [str(f) for f in facilities(graph) if fold(value(graph, f, SCHEMA.name)) == fold(name)]
+    result = call_json("explain_provenance", {"facility": name.upper()})
+    assert len(named) == 1 and result["iri"] == named[0], (named, result.get("iri"))
+    assert result["name"] == name
+    assert result["sources"] == [], "directory.ttl has no pipeline graphs, so no source records"
+
+    containing = {str(f) for f in facilities(graph) if "jugend" in fold(value(graph, f, SCHEMA.name))}
+    ambiguous = call_json("explain_provenance", {"facility": "Jugend"})
+    assert len(containing) > 1 and ambiguous["found"] is False
+    candidates = {c["iri"] for c in ambiguous["candidates"]}
+    assert candidates <= containing and len(candidates) == min(len(containing), 10)
+    assert ambiguous["more_candidates"] == (len(containing) > 10)
+
+    is_error, text = mcp_call("explain_provenance", {"facility": "https://example.org/x"})
+    assert is_error and "not a directory IRI" in text, text[:200]
+
+
+def test_e2e_list_sources_counts_records_and_coverage_from_the_graphs():
+    dataset = load_dataset(PIPELINE)
+    mapped, federation = dataset.graph(MAPPED), dataset.graph(FEDERATION)
+    with serving_named_graphs(PIPELINE):
+        result = call_json("list_sources", once=False)
+
+    records = Counter(
+        str(federation.value(source, RDFS.label)) for source in mapped.objects(None, CDP.fromSource)
+    )
+    assert {s["source"]: s["source_records"] for s in result["sources"]} == dict(records)
+    assert {s["source"]: s["coverage"] for s in result["sources"]} == {
+        str(federation.value(source, RDFS.label)): str(federation.value(source, CDP.coverageLabel))
+        for source in set(mapped.objects(None, CDP.fromSource))
+    }
+    assert all(s["harvested_at"] for s in result["sources"]), result["sources"]
+
+
+def test_e2e_list_sources_without_pipeline_graphs_is_empty_with_notes():
+    result = call_json("list_sources")
+    assert result["sources"] == [], "directory.ttl has no pipeline graphs"
+    assert result["notes"], "the notes on reading counts and dates must always be there"
 
 
 # ---- find_help prompt ------------------------------------------------------------

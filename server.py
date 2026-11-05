@@ -4,12 +4,14 @@ Each tool calls one SparqlClient method (src/sparql_client.py), which runs the q
 sparql_queries/ against the live SPARQL endpoint. Run with `python server.py` (stdio).
 """
 
+import functools
 import json
 import sys
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
-from src.sparql_client import SparqlClient
+from src.sparql_client import EndpointError, SparqlClient
 
 sparql = SparqlClient()
 
@@ -22,7 +24,24 @@ def to_json(data) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+def tool(fn):
+    """Register fn as an MCP tool whose endpoint failures reach the model.
+
+    mcp 2.x shows the model only ToolError messages; any other exception becomes a bare
+    "Error executing tool X", so the model could not say why or decide to retry.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except EndpointError as exc:
+            raise ToolError(str(exc)) from exc
+
+    return mcp.tool()(wrapper)
+
+
+@tool
 def count_facilities(city: str) -> int:
     """
     Count facilities in a city in the federated directory of
@@ -37,7 +56,7 @@ def count_facilities(city: str) -> int:
     return sparql.count_facilities(city)
 
 
-@mcp.tool()
+@tool
 def detect_duplicates() -> str:
     """
     Detect duplicate entries in all datasets of the directory
@@ -54,7 +73,7 @@ def detect_duplicates() -> str:
     return to_json(sparql.detect_duplicates())
 
 
-@mcp.tool()
+@tool
 def search_facilities(city: str) -> str:
     """
     Search for facilities in a city.
@@ -71,7 +90,7 @@ def search_facilities(city: str) -> str:
     return to_json(sparql.search_facilities(city))
 
 
-@mcp.tool()
+@tool
 def get_facility_details(name: str) -> str:
     """
     Find facilities by name and return detailed information.
@@ -87,7 +106,7 @@ def get_facility_details(name: str) -> str:
     return to_json(sparql.get_facility_details(name))
 
 
-@mcp.tool()
+@tool
 def search_services(query: str) -> str:
     """
     Search the structured service catalogue.
@@ -102,7 +121,7 @@ def search_services(query: str) -> str:
     return to_json(sparql.search_services(query))
 
 
-@mcp.tool()
+@tool
 def find_social_help(need: str, limit: int = 5, postal_code_prefix: str = "") -> str:
     """
     Find social-service offers in the directory for a person's need.
@@ -125,7 +144,7 @@ def find_social_help(need: str, limit: int = 5, postal_code_prefix: str = "") ->
     return to_json(sparql.find_help(need, limit, postal_code_prefix))
 
 
-@mcp.tool()
+@tool
 def check_completeness() -> str:
     """
     Check completeness of all datasets (facilities, addresses,
@@ -141,7 +160,7 @@ def check_completeness() -> str:
     return to_json(sparql.check_completeness())
 
 
-@mcp.tool()
+@tool
 def generate_statistics() -> str:
     """
     Generate statistics for the datasets of the directory.
@@ -154,7 +173,7 @@ def generate_statistics() -> str:
     return to_json(sparql.generate_statistics())
 
 
-@mcp.tool()
+@tool
 def compare_facilities(facility_1: str, facility_2: str) -> str:
     """
     Compare two facilities by name.
@@ -170,7 +189,7 @@ def compare_facilities(facility_1: str, facility_2: str) -> str:
     return to_json(sparql.compare_facilities(facility_1, facility_2))
 
 
-@mcp.tool()
+@tool
 def list_providers() -> str:
     """
     List all provider organisations in the federated directory.
@@ -182,7 +201,7 @@ def list_providers() -> str:
     return to_json(sparql.list_providers())
 
 
-@mcp.tool()
+@tool
 def search_by_postal_code(postal_code: str) -> str:
     """
     Find welfare facilities by German postal code.
@@ -197,7 +216,7 @@ def search_by_postal_code(postal_code: str) -> str:
     return to_json(sparql.search_by_postal_code(postal_code))
 
 
-@mcp.tool()
+@tool
 def count_facilities_per_postal_code(
     postal_code_prefix: str = "",
     order: str = "most_facilities",
@@ -227,7 +246,7 @@ def count_facilities_per_postal_code(
     return to_json(sparql.count_facilities_per_postal_code(postal_code_prefix, order, limit))
 
 
-@mcp.tool()
+@tool
 def facilities_per_inhabitant_by_region(
     level: str = "region",
     order: str = "lowest_per_10k",
@@ -265,7 +284,7 @@ def facilities_per_inhabitant_by_region(
     ))
 
 
-@mcp.tool()
+@tool
 def records_to_fix_first(
     city: str = "Berlin",
     provider: str | None = None,
@@ -339,7 +358,7 @@ def records_to_fix_first(
     )
 
 
-@mcp.tool()
+@tool
 def data_quality_report(organisation: str = "") -> str:
     """
     Data quality scorecard per organisation that provided records, for data
@@ -368,7 +387,7 @@ def data_quality_report(organisation: str = "") -> str:
     return to_json(sparql.data_quality_report(organisation))
 
 
-@mcp.tool()
+@tool
 def find_nearby(
     location: str,
     radius_km: float = 2.0,
@@ -406,7 +425,7 @@ def find_nearby(
     )
 
 
-@mcp.tool()
+@tool
 def get_awo_details(iri: str) -> str:
     """
     Get the address, map link, contacts, and opening hours for one facility.
@@ -429,7 +448,7 @@ def get_awo_details(iri: str) -> str:
     return to_json(result)
 
 
-@mcp.tool()
+@tool
 def search_service_candidates(query: str, limit: int = 5, offset: int = 0) -> str:
     """
     Search services (offers) by name, category or audience, and get for each one the
@@ -457,7 +476,7 @@ def search_service_candidates(query: str, limit: int = 5, offset: int = 0) -> st
     return to_json(sparql.search_service_candidates(query, limit=limit, offset=offset))
 
 
-@mcp.tool()
+@tool
 def get_entity_card(iri: str) -> str:
     """
     Get every recorded field of one facility, service, provider or address by its exact
@@ -484,7 +503,7 @@ def get_entity_card(iri: str) -> str:
     return to_json(sparql.get_entity_card(iri))
 
 
-@mcp.tool()
+@tool
 def search_directory(
     query: str,
     provider: str | None = None,
@@ -639,6 +658,60 @@ E. What the directory doesn't cover, in one line, when it matters for this need
    offer to look for something else or somewhere else.
 
 If nothing fits, say so honestly rather than suggesting unrelated services."""
+
+
+@tool
+def explain_provenance(facility: str, field: str | None = None) -> str:
+    """
+    Explain where the values of one directory entry come from: which source
+    organisations' records (Caritas, DHS, Sozialplattform, AWO, Destatis)
+    supplied each value, where the sources disagree, which values the
+    directory kept, and which values were inherited from a parent
+    organisation. Use this when asked where a phone number, email, opening
+    hours or other value comes from, whether the sources agree, which value
+    to trust, or where to verify an entry.
+
+    Args:
+        facility: Facility name (for example "Caritas-Zentrum Kaiserslautern -
+            Schuldnerberatung"), or the iri of a facility, service or provider
+            as returned by other tools (a short ID such as "org-00416a783a9b"
+            also works). If a name matches several facilities, the candidates
+            are returned: call again with one candidate's iri.
+        field: Optional, explain only this field: name, alternate_name,
+            telephone, email, homepage, opening_hours, detail_page, category,
+            audience, accessibility, area_served, street, postal_code, city,
+            description or services. Without it, every field that has a value
+            is explained, except the long texts description and services.
+
+    Returns:
+        JSON with the entry, its source records (with detail pages to verify
+        them) and, per field, a status (single_source, sources_agree,
+        sources_differ or not_from_own_sources) and each value with the
+        sources that supplied it and whether the directory kept it.
+    """
+
+    try:
+        return to_json(sparql.explain_provenance(facility, field))
+    except ValueError as exc:
+        # mcp 2.x shows the model only ToolError messages; other errors stay on the server.
+        raise ToolError(str(exc)) from exc
+
+
+@tool
+def list_sources() -> str:
+    """
+    List the organisations whose data the federated directory combines (for
+    example Caritas, DHS, Sozialplattform, AWO, Destatis), with the area each
+    source covers, how many records it contributed and when it was harvested.
+    Use this to explain what the directory covers, why a provider has no
+    entries in a region, or how current the data is.
+
+    Returns:
+        JSON with one entry per source and notes on how to read the counts
+        and dates.
+    """
+
+    return to_json(sparql.list_sources())
 
 
 if __name__ == "__main__":

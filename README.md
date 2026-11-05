@@ -7,12 +7,15 @@ in Germany: "How many facilities are in Berlin?", "Find addiction counselling se
 
 The data comes **live** from the *Federated directory of social support services in
 Germany* (SoSuSe), a public SPARQL endpoint run by CorrelAid:
-`https://sosuse.correlaid.org/directory/sparql`.
+`https://sosuse.correlaid.org/directory/sparql`. 
+The code for the data pool was written by Benjamin Degenhart and is available on [the Github](https://github.com/foederierter-datenpool).
 
 > **History.** The project started at a datathon on a local CSV export of AWO data
 > (`data/*.csv`). All tools now query the live directory instead. The directory federates
 > several providers (mostly Caritas and DHS, AWO is a small part), so numbers are much larger
 > than in the CSV days (e.g. Berlin: 646 facilities instead of 151).
+> The datathon project started as a fork of a previously built pilot [Hasan Atrash's awo-mcp-production](https://github.com/Atrash87/awo-mcp-production). 
+> Hasan's work definitely simplified the work during the datathon and we are greatful for him letting us use his work.
 
 ![AWO MCP demo with Claude Desktop](assets/awo_mcp_claude_demo.gif)
 
@@ -46,7 +49,7 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `src/legacy/` | The old pandas/CSV implementation. **Not used by the server.** Kept as the reference that the offline parity tests compare the SPARQL queries against. |
 | `data/directory.ttl` | RDF snapshot of the directory. The offline tests run the real queries on it, so CI needs no network. |
 | `data/*Schema.csv` | The original AWO CSV export. Used only by the tests; its headers define the `DATASETS` columns. |
-| `tests/` | Five test layers (unit, MCP protocol, live API, LLM connection, LLM tool-calling evals) and a live test dashboard. See [TEST.md](TEST.md). |
+| `tests/` | Five test layers (unit, MCP protocol, live API, LLM connection, LLM tool-calling evals) and a live test dashboard. See [TESTS.md](TESTS.md). |
 | `benchmarking/` | LLM benchmark against the real server: multilingual, professional and smoke case suites, an agent loop over MCP, deterministic evaluators, optional rubric judge, tool-profile comparisons and leaderboards. See [benchmarking/README.md](benchmarking/README.md). |
 | `.github/workflows/` | CI: offline tests on every push, live API tests and LLM evals on manual trigger. |
 | `doc/` | Datathon presentations. |
@@ -75,10 +78,22 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `get_entity_card(iri)` | Every recorded field of a facility, service, provider or address, the missing fields, syntax-only quality notes (e.g. a phone without leading 0) and typed links (service → facility → address/provider) | "What exactly does the directory record for this entry?" |
 | `search_service_candidates(query, limit, offset)` | Services matching name/category/audience, each with the facility or provider that runs it and its postal code and locality; paged | "Which debt counselling services are there, and which office runs each?" |
 | `search_directory(query, provider, has_telephone, limit, offset)` | Facilities where every term matches their own text, address or a linked service; provider and phone filters; paged hits, with totals and missing-field counts over all matches | "How many debt counselling facilities in Kreuzberg have a phone number?" |
+| `explain_provenance(facility, field=None)` | For one entry (name, IRI or ID): its source records with detail pages, and per field which sources supplied each value, whether they agree and which values the directory kept or inherited | "Which sources list this facility's phone number, and do they agree?" |
+| `list_sources()` | The federated sources with declared coverage, record counts and harvest dates | "Which organisations' data is in the directory, and how current is it?" |
 
 Matching is case-insensitive (`GIESSEN` finds `Gießen`). City matches are **exact**, so
 `Berlin` does not include `Berlin-Mitte`. Name and service searches are substring matches.
 
+### Where does a value come from?
+
+The directory merges records from several sources (Caritas, DHS, Sozialplattform, AWO,
+Destatis). `explain_provenance` reads the pipeline's named graphs on the same endpoint and
+shows, per value, which source supplied it. Live example (harvest of 2026-10-06):
+*Caritas-Zentrum Kaiserslautern - Schuldnerberatung* has two phone numbers. `+4963136120222`
+comes from DHS and Sozialplattform, `+4963136120225` from Caritas. DHS and Sozialplattform
+also give different opening hours, and the directory keeps only Sozialplattform's. The
+homepage of *Drehscheibe Kinder - und Jugendpolitik* is not in its own AWO record but
+inherited from its Träger, so it may lead to a head office.
 ## Prompts
 
 | Prompt | What it does |
@@ -150,7 +165,7 @@ pytest -m api tests               # every tool against the live endpoint (~1 min
 ```
 
 `pytest` opens a live dashboard in your browser (`--no-dashboard` to turn it off). The LLM
-evals need a running Open WebUI and are described with everything else in [TEST.md](TEST.md).
+evals need a running Open WebUI and are described with everything else in [TESTS.md](TESTS.md).
 
 ## Known limitations
 
@@ -162,6 +177,9 @@ evals need a running Open WebUI and are described with everything else in [TEST.
   `detect_duplicates` scan all ~67k entities (5–15 s). There is no paging yet.
 * **Few provider links.** Only a few dozen facilities have a `schema:parentOrganization`,
   so per-provider statistics are thin.
+* **Provenance is limited to what the pipeline records.** Values that were corrected,
+  combined or geocoded have no source record; `explain_provenance` reports them without a
+  source instead of guessing. Entity IRIs can change between directory snapshots.
 
 More on the data model and the endpoint: [QUERIES.md](QUERIES.md).
 

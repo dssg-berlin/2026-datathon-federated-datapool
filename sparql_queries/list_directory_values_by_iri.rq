@@ -1,0 +1,38 @@
+# List the literal values of one entity in the finished directory, its class, whether each
+# exact value is supplied by one of the entity's own source records (?traced), and, where a
+# parent (schema:parentOrganization of a facility, schema:provider of a service) has a source
+# record with the same value, that parent and record: the value may be inherited from it.
+# No row means the IRI is not in the directory. {{iri}} is a full entity IRI, checked in
+# Python (SparqlClient.explain_provenance) and turned into an IRI here, because placeholders
+# may only be string literals.
+# Params: {{iri}}
+# Used by: SparqlClient.explain_provenance -> MCP tool explain_provenance
+PREFIX schema: <http://schema.org/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX cdp: <https://civic-data.de/pipeline#>
+
+SELECT ?type ?predicate ?value ?traced
+       ?parent ?parent_name ?parent_record ?parent_source_label
+WHERE {
+    BIND(IRI("{{iri}}") AS ?entity)
+    ?entity a ?type ;
+            ?predicate ?value .
+    FILTER(isLiteral(?value))
+    BIND(EXISTS {
+        GRAPH <urn:directory:data/pipeline/matches.ttl> { ?entity cdp:hasMember ?own }
+        GRAPH <urn:directory:data/pipeline/mapped.ttl> { ?own ?predicate ?value }
+    } AS ?traced)
+    OPTIONAL {
+        ?entity schema:parentOrganization|schema:provider ?parent .
+        GRAPH <urn:directory:data/pipeline/matches.ttl> { ?parent cdp:hasMember ?parent_record }
+        GRAPH <urn:directory:data/pipeline/mapped.ttl> {
+            ?parent_record ?predicate ?value ;
+                           cdp:fromSource ?parent_source .
+        }
+        OPTIONAL { ?parent schema:name ?parent_name }
+        OPTIONAL {
+            GRAPH <urn:directory:config/federation.ttl> { ?parent_source rdfs:label ?parent_source_label }
+        }
+    }
+}
+ORDER BY ?predicate ?value ?parent_record

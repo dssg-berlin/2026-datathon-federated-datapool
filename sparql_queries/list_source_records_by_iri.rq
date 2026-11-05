@@ -1,0 +1,17 @@
+# List the source records of one entity with their source (the endpoint's "sources-of"
+# example). {{iri}} is a full entity IRI; it is only compared as a string here, so tests can
+# pass it without the IRI check in SparqlClient.
+# Params: {{iri}}
+# Used by: tests/api/test_sparql.py (independent reference for explain_provenance)
+PREFIX cdp: <https://civic-data.de/pipeline#>
+
+SELECT DISTINCT ?record ?source WHERE {
+    GRAPH <urn:directory:data/pipeline/matches.ttl> {
+        ?entity cdp:hasMember ?record .
+        FILTER(STR(?entity) = "{{iri}}")
+    }
+    GRAPH <urn:directory:data/pipeline/mapped.ttl> {
+        ?record cdp:fromSource ?source .
+    }
+}
+ORDER BY ?record

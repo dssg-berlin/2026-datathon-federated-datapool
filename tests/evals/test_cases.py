@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import LocalSparqlClient, load_graph, mcp_call, mcp_list_tools
+from tests.helpers import LocalSparqlClient, load_dataset, mcp_call, mcp_list_tools
 
 CASES = json.loads((Path(__file__).parent / "cases.json").read_text())
 CASES_PER_TOOL = 2
@@ -25,7 +25,8 @@ def offline_server():
     import server
 
     live = server.sparql
-    server.sparql = LocalSparqlClient(load_graph())
+    # A dataset, not a graph: rdflib refuses the provenance tools' GRAPH queries on a graph.
+    server.sparql = LocalSparqlClient(load_dataset())
     yield
     server.sparql = live
 
