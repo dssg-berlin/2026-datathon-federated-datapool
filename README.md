@@ -13,6 +13,8 @@ Germany* (SoSuSe), a public SPARQL endpoint run by CorrelAid:
 > (`data/*.csv`). All tools now query the live directory instead. The directory federates
 > several providers (mostly Caritas and DHS, AWO is a small part), so numbers are much larger
 > than in the CSV days (e.g. Berlin: 646 facilities instead of 151).
+> The datathon project started as a fork of a previously built pilot [Hasan Atrash's awo-mcp-production](https://github.com/Atrash87/awo-mcp-production). 
+> Hasan's work definitely simplified the work during the datathon and we are greatful for him letting us use his work.
 
 ![AWO MCP demo with Claude Desktop](assets/awo_mcp_claude_demo.gif)
 
