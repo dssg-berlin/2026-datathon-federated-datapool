@@ -7,7 +7,8 @@ in Germany: "How many facilities are in Berlin?", "Find addiction counselling se
 
 The data comes **live** from the *Federated directory of social support services in
 Germany* (SoSuSe), a public SPARQL endpoint run by CorrelAid:
-`https://sosuse.correlaid.org/directory/sparql`.
+`https://sosuse.correlaid.org/directory/sparql`. 
+The code for the data pool was written by Benjamin Degenhart and is available on [the Github](https://github.com/foederierter-datenpool).
 
 > **History.** The project started at a datathon on a local CSV export of AWO data
 > (`data/*.csv`). All tools now query the live directory instead. The directory federates
