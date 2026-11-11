@@ -27,6 +27,8 @@ def markdown_report(meta: dict[str, Any], summaries: list[GroupSummary], cards: 
     if meta.get("oracle_only"):
         lines.append("- **Oracle run: a scripted stand-in called the expected tools. This checks the pipeline "
                      "and the server; it is not a model measurement.**")
+    if meta.get("interrupted"):
+        lines.append(f"- **Interrupted run: {meta['interrupted']}. The numbers cover only those runs.**")
     if meta.get("fault"):
         lines.append(f"- fault injection: `{meta['fault']}`")
     lines += [

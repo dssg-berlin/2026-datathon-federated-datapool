@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -129,10 +130,42 @@ def build_parser(defaults: dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("--fail-under", type=float, default=None,
                         help="exit with 1 when a (model, profile) pass rate is below this fraction")
     parser.add_argument("--quiet", action="store_true", help="do not print the report")
+    parser.add_argument("--report-from", default="", metavar="RUNS_PARTIAL_JSONL",
+                        help="write the reports of an interrupted run from its runs-partial-*.jsonl and exit")
     return parser
 
 
+def finish(args: argparse.Namespace, meta: dict[str, Any], cards: list[RunScorecard]) -> int:
+    """Summaries, reports and the exit code for the finished (or recovered) runs."""
+    profiles = meta["tool_profiles"]
+    summaries = summarize(cards)
+    paired = [change for p in profiles[1:] for change in paired_changes(cards, profiles[0], p)]
+    paths = write_reports(args.output_dir, meta, summaries, cards, paired)
+    if not args.quiet:
+        print_report(markdown_report(meta, summaries, cards, paired))
+    print("reports: " + ", ".join(str(p) for p in paths.values()), file=sys.stderr)
+    if args.fail_under is not None and any(s.pass_rate < args.fail_under for s in summaries):
+        return 1
+    return 0
+
+
+def report_from_partial(args: argparse.Namespace) -> int:
+    """Reports for a run that was interrupted: its first line is the meta, then one run per line."""
+    lines = [json.loads(line) for line in Path(args.report_from).read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not lines or "meta" not in lines[0]:
+        print(f"{args.report_from} is not a runs-partial file", file=sys.stderr)
+        return 2
+    cards = [RunScorecard.model_validate(line) for line in lines[1:]]
+    if not cards:
+        print(f"{args.report_from} holds no finished run", file=sys.stderr)
+        return 2
+    meta = {**lines[0]["meta"], "interrupted": f"{len(cards)} of {lines[0]['planned_runs']} runs finished"}
+    return finish(args, meta, cards)
+
+
 async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    if args.report_from:
+        return report_from_partial(args)
     if args.offline:
         args.transport = "inprocess"
     registry = ModelsRegistryConfig.from_yaml(CONFIG_DIR / "models.yaml")
@@ -194,6 +227,24 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
         max_steps = args.max_steps or int(config.get("agent", {}).get("max_steps", 6))
         semaphore = asyncio.Semaphore(max(1, args.concurrency))
 
+        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        server = conn.url if conn.transport == "streamable_http" else (
+            "server.py on data/directory.ttl (offline)" if conn.offline else
+            f"server.py ({conn.transport}) on {args.sparql_endpoint or os.environ.get('SPARQL_ENDPOINT', 'the live SoSuSe endpoint')}")
+        meta = {
+            "started_at": started, "server": server, "suites": suites, "cases": len(cases), "runs_per_case": args.runs,
+            "tool_profiles": profiles, "offered_tools": offered, "models": [m.id for m in models],
+            "judge_model": args.judge_model or None, "fault": None if fault == FaultMode.NONE else fault.value,
+            "oracle_only": all(m.tier == "oracle" for m in models), "max_steps": max_steps,
+        }
+        # Every finished run is appended here, so an interrupted run keeps its results
+        # (--report-from). The file is removed once the reports are written.
+        out_dir = Path(args.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        partial = out_dir / f"runs-partial-{started.replace(':', '').replace('-', '')[:15]}Z.jsonl"
+        planned = len(models) * len(profiles) * len(cases) * args.runs
+        partial.write_text(json.dumps({"meta": meta, "planned_runs": planned}, ensure_ascii=False) + "\n", encoding="utf-8")
+
         async def one(model_cfg: ModelEntryConfig, profile: str, case: EvalCase, run_index: int) -> RunScorecard:
             async with semaphore:
                 if model_cfg.provider == claude_code.PROVIDER:
@@ -213,32 +264,17 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 card = build_scorecard(run, results, verdict)
                 mark = "PASS" if card.passed else f"FAIL ({card.stage})"
                 print(f"[{model_cfg.id} / {profile}] {case.suite}/{case.id} #{run_index}: {mark}", file=sys.stderr)
+                with partial.open("a", encoding="utf-8") as f:
+                    f.write(card.model_dump_json() + "\n")
                 return card
 
-        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
         cards = await asyncio.gather(*[
             one(m, p, c, r) for m in models for p in profiles for c in cases for r in range(1, args.runs + 1)
         ])
 
-    summaries = summarize(list(cards))
-    paired = [change for p in profiles[1:] for change in paired_changes(list(cards), profiles[0], p)]
-    server = conn.url if conn.transport == "streamable_http" else (
-        "server.py on data/directory.ttl (offline)" if conn.offline else
-        f"server.py ({conn.transport}) on {args.sparql_endpoint or os.environ.get('SPARQL_ENDPOINT', 'the live SoSuSe endpoint')}")
-    meta = {
-        "started_at": started, "server": server, "suites": suites, "cases": len(cases), "runs_per_case": args.runs,
-        "tool_profiles": profiles, "offered_tools": offered, "models": [m.id for m in models],
-        "judge_model": args.judge_model or None, "fault": None if fault == FaultMode.NONE else fault.value,
-        "oracle_only": all(m.tier == "oracle" for m in models), "max_steps": max_steps,
-    }
-    paths = write_reports(args.output_dir, meta, summaries, list(cards), paired)
-    if not args.quiet:
-        print_report(markdown_report(meta, summaries, list(cards), paired))
-    print("reports: " + ", ".join(str(p) for p in paths.values()), file=sys.stderr)
-
-    if args.fail_under is not None and any(s.pass_rate < args.fail_under for s in summaries):
-        return 1
-    return 0
+    code = finish(args, meta, list(cards))
+    partial.unlink(missing_ok=True)
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:

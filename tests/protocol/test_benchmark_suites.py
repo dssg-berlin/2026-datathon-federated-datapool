@@ -46,3 +46,23 @@ def test_oracle_benchmark_runs_end_to_end_offline(tmp_path):
     assert not passed[("baseline", "entity-card-by-iri")], "baseline profile must hide get_entity_card"
     assert {p["change"] for p in data["paired"]} == {"gain", "same"}
     assert list(tmp_path.glob("leaderboard-*.csv")) and list(tmp_path.glob("paired-*.csv"))
+
+
+def test_interrupted_run_keeps_its_finished_runs(tmp_path):
+    args = ["--offline", "--models", "oracle", "--suites", "smoke", "--cases", "find-help-debt,count-berlin",
+            "--concurrency", "1", "--quiet", "--output-dir", str(tmp_path)]
+    assert main(args) == 0
+    assert not list(tmp_path.glob("runs-partial-*.jsonl")), "a finished run removes its partial file"
+
+    # What an interrupted run leaves behind: the meta line and the runs finished so far.
+    [report] = tmp_path.glob("benchmark-*.json")
+    data = json.loads(report.read_text(encoding="utf-8"))
+    partial = tmp_path / "runs-partial-test.jsonl"
+    partial.write_text("\n".join([json.dumps({"meta": data["meta"], "planned_runs": 2}),
+                                  json.dumps(data["runs"][0])]) + "\n", encoding="utf-8")
+    recovered = tmp_path / "recovered"
+    assert main(["--report-from", str(partial), "--quiet", "--output-dir", str(recovered)]) == 0
+    [markdown] = recovered.glob("benchmark-*.md")
+    assert "Interrupted run: 1 of 2 runs finished" in markdown.read_text(encoding="utf-8")
+    [recovered_json] = recovered.glob("benchmark-*.json")
+    assert len(json.loads(recovered_json.read_text(encoding="utf-8"))["runs"]) == 1

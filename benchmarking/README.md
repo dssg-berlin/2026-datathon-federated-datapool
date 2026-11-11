@@ -168,6 +168,11 @@ Every run writes five files, named with the UTC time of the run:
 | `runs-<time>.csv` | One row per run: expected tools, first tool, all tools called, stage, failures |
 | `paired-<time>.csv` | Only with several tool profiles: per-case gains and losses |
 
+While a run is in progress, every finished case is appended to `runs-partial-<time>.jsonl`
+in the output directory (removed at the end). If a run is interrupted (laptop asleep, usage
+limit, Ctrl+C), `python -m benchmarking.run_benchmark --report-from <that file>` writes the
+reports for the cases that finished.
+
 By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,
 write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.
 [snapshots/README.md](snapshots/README.md) lists the committed snapshots and compares them.
