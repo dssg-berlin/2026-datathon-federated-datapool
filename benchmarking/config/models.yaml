@@ -97,18 +97,24 @@ tiers:
         cost_per_1k_input_usd: 0.0
         cost_per_1k_output_usd: 0.0
 
+      # Ollama cuts a prompt to its context window without an error, and its default
+      # window (4096 tokens) is smaller than the server's tool definitions (~5,000 tokens):
+      # the model then sees only part of the tool list. num_ctx must cover the tools, the
+      # request and the tool results. `ollama pull qwen2.5:7b` installs the model.
       - id: "qwen-2-5-7b-ollama"
         name: "Qwen 2.5 7B Instruct (Ollama)"
-        litellm_model: "ollama_chat/qwen2.5:7b-instruct"
+        litellm_model: "ollama_chat/qwen2.5:7b"
         provider: "ollama"
         tier: "local"
         api_base: "http://localhost:11434"
         temperature: 0.0
         max_tokens: 2048
-        timeout_seconds: 60.0
+        timeout_seconds: 900.0
         supports_tool_choice: true
         cost_per_1k_input_usd: 0.0
         cost_per_1k_output_usd: 0.0
+        extra_params:
+          num_ctx: 16384
 
       - id: "llama-3-8b-ollama"
         name: "Llama 3 8B Instruct (Ollama)"

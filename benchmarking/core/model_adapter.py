@@ -57,6 +57,9 @@ class ModelEntryConfig(BaseModel):
     supports_tool_choice: bool = True
     cost_per_1k_input_usd: float = Field(default=0.0, ge=0.0)
     cost_per_1k_output_usd: float = Field(default=0.0, ge=0.0)
+    extra_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="provider-specific request parameters, e.g. {num_ctx: 16384} for Ollama")
 
 
 class ModelTierGroup(BaseModel):
@@ -213,7 +216,7 @@ class LiteLLMChatModel:
         kwargs: dict[str, Any] = {
             "model": self.cfg.litellm_model, "messages": messages,
             "temperature": self.cfg.temperature, "max_tokens": self.cfg.max_tokens,
-            "timeout": self.cfg.timeout_seconds,
+            "timeout": self.cfg.timeout_seconds, **self.cfg.extra_params,
         }
         api_base = (os.environ.get(self.cfg.api_base_env) if self.cfg.api_base_env else None) or self.cfg.api_base
         if api_base:
