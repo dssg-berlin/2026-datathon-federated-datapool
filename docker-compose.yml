@@ -1,0 +1,11 @@
+# Run the AWO MCP server:  docker compose up -d --build
+# MCP endpoint: http://localhost:8000/mcp   (health: http://localhost:8000/health)
+services:
+  awo-mcp:
+    build: .
+    image: awo-mcp:latest
+    ports:
+      - "${MCP_PUBLISHED_PORT:-8000}:8000"
+    environment:
+      SPARQL_ENDPOINT: "${SPARQL_ENDPOINT:-https://sosuse.correlaid.org/directory/sparql}"
+    restart: unless-stopped

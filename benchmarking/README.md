@@ -145,7 +145,7 @@ Be careful to distinguish between real LLM measurements and simulated/stand-in r
 | `--concurrency 4` | number of case runs executed in parallel (lower to `1` for rate-limited keys) |
 | `--judge-model gpt-4o` | add the rubric judge (reported next to the deterministic pass/fail) |
 | `--fault timeout_30s` | inject a simulated fault into the first call of each tool (`empty_payload`, `server_crash`, `missing_contact_strip`, `malformed_json`) |
-| `--transport streamable_http --url http://host:7860/mcp` | benchmark a deployed server instead of starting `server.py` |
+| `--transport streamable_http --url http://localhost:8000/mcp` | benchmark a deployed server instead of starting `server.py` |
 | `--sparql-endpoint URL` | start `server.py` against another SPARQL endpoint |
 | `--offline` | run `server.py` in-process on `data/directory.ttl` (no network; numbers differ from live) |
 | `--fail-under 0.8` | exit code 1 when a pass rate is below 80 % (for CI) |
