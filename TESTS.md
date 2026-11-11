@@ -325,6 +325,7 @@ the graph's triples (rdflib, not the `.rq` files).
 
 | Test | Checks |
 |---|---|
+| `test_server_sends_instructions_with_crisis_numbers` | the server's MCP instructions (shown to the model by clients) carry the no-invention rule and the crisis numbers |
 | `test_baseline_tools_are_listed` | none of the 19 tools in `SMOKE_ARGS` disappeared |
 | `test_every_listed_tool_has_smoke_args` | **fails when someone adds a tool without registering it in `SMOKE_ARGS`** – the prompt to add tests |
 | `test_tool_metadata_is_llm_friendly` (×19) | docstring ≥ 20 chars, valid object schema, required ⊆ properties |

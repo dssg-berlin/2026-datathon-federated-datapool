@@ -251,3 +251,16 @@ def test_unknown_transport_is_rejected(monkeypatch):
     monkeypatch.setenv("MCP_TRANSPORT", "carrier-pigeon")
     with pytest.raises(SystemExit, match="carrier-pigeon"):
         server.main()
+
+
+def test_server_sends_instructions_with_crisis_numbers():
+    """MCP clients show these to the model: no invented contacts, and crisis numbers first."""
+    from benchmarking.core.mcp_client import MCPBenchmarkClient, MCPConnectionConfig
+
+    async def run():
+        async with MCPBenchmarkClient(MCPConnectionConfig(transport="inprocess", offline=True)) as client:
+            return client.instructions
+
+    instructions = asyncio.run(run())
+    for expected in ["112", "0800 111 0 111", "Never invent", "nothing was found"]:
+        assert expected in instructions, f"server instructions are missing {expected!r}"

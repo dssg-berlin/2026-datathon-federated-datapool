@@ -20,7 +20,20 @@ from src.sparql_client import EndpointError, SparqlClient
 
 sparql = SparqlClient()
 
-mcp = MCPServer("AWO MCP")
+# Sent to the client when it connects; MCP clients show it to the model with the tool list.
+INSTRUCTIONS = """\
+Federated directory of social support services in Germany: facilities, the services they
+offer, addresses and provider organisations (mostly Caritas, DHS and AWO).
+- The data is German. Search with German terms and keep names and addresses unchanged.
+- Report only what the tools return. Never invent phone numbers, email addresses, opening
+  hours or facilities; a missing field is "not on record". If nothing matches, say that
+  nothing was found in the directory.
+- If someone may be in danger or in a crisis, first give the emergency numbers 112
+  (emergency), 110 (police) and TelefonSeelsorge 0800 111 0 111 (free, around the clock),
+  then search.
+"""
+
+mcp = MCPServer("AWO MCP", instructions=INSTRUCTIONS)
 
 
 def to_json(data) -> str:
@@ -113,10 +126,12 @@ def find_social_help(need: str, limit: int = 5, postal_code_prefix: str = "") ->
     addiction or migration, each with facility, address, phone and email. Use it for
     requests such as "I have debts, where can I get help?" in any language. If the
     person gives a postal code or a place and wants what is closest, use find_nearby.
+    For any other topic (for example a women's shelter, disability or mental health),
+    use search_directory or find_nearby with German search terms.
 
     Args:
-        need: "debt", "housing", "family", "elderly", "addiction" or "migration": the
-            one closest to the request.
+        need: Exactly one of these English words, whatever the language of the request:
+            "debt", "housing", "family", "elderly", "addiction", "migration".
         limit: Offers to return (1-10, default 5).
         postal_code_prefix: Optional start of a postal code, e.g. "10" or "10997", to
             only return offers there.
@@ -134,9 +149,10 @@ def find_social_help(need: str, limit: int = 5, postal_code_prefix: str = "") ->
 def check_completeness() -> str:
     """
     Count the missing values per dataset and field (facilities, addresses, services,
-    providers) in the whole directory. Use it for "how complete is the data?" or "which
-    fields are missing most often?". For one organisation use data_quality_report; for
-    the records of one city use records_to_fix_first.
+    providers) in the whole directory. Use it for "how complete is the data?", "which
+    fields are missing most often?" or "how many services have no provider link?". For
+    one organisation use data_quality_report; for the records of one city use
+    records_to_fix_first.
 
     Returns:
         JSON with completeness per dataset and per field.
@@ -331,13 +347,14 @@ def find_nearby(
 ) -> str:
     """
     Find facilities near a place, nearest first, with distance, address, contacts,
-    opening hours and a map link. Use it when the user gives a postal code, coordinates or a landmark
-    ("near 13353", "around Alexanderplatz"), with or without a topic.
+    opening hours and a map link. Use it when the user names a place: a postal code,
+    coordinates or a landmark ("near 13353", "close to Alexanderplatz"), with or without
+    a topic.
 
     Args:
-        location: Five-digit postal code ("13353") or "latitude,longitude"
-            ("52.5446,13.3592"). For a landmark or neighbourhood, pass its approximate
-            coordinates.
+        location: Five-digit postal code ("13353") or "latitude,longitude" in decimal
+            degrees ("52.5446,13.3592"), nothing else. For a landmark or neighbourhood,
+            pass its approximate coordinates.
         radius_km: Search radius in kilometres (0.1-50, default 2).
         query: Optional German search terms matched against name, category, services
             and audience. Comma-separated terms match any of them ("Sucht, Alkohol").
@@ -361,7 +378,7 @@ def search_service_candidates(query: str, limit: int = 5, offset: int = 0) -> st
     """
     Search the service catalogue (offers) by name, category or audience, and get for
     each service the facility or provider that runs it, with that office's postal code
-    and locality. Use it for "which services exist around X?" or "who offers X?".
+    and locality. Use it for "which services are there for X?" or "who offers X?".
 
     Use short German terms ("Schuldner", "Suchtberatung", "Senioren"). Matching is a
     literal substring. Facility names and descriptions are not searched: use
@@ -388,7 +405,8 @@ def get_entity_card(iri: str) -> str:
     provider or address): contacts, opening hours, accessibility, audience, the fields
     that are missing, and its links (service -> facility -> address and provider) with
     the services a facility offers. Use it when the user gives an IRI, or to check an
-    entry another tool returned before passing its details on.
+    entry another tool returned before passing its details on. If you only have a name,
+    look it up with get_facility_details first.
 
     A null field is not on record: say so, do not fill it in. Copy telephone values
     exactly, without adding or removing digits. The card shows what is recorded, not
@@ -415,7 +433,8 @@ def search_directory(
     accessibility, opening hours, address and the linked services. Every term must
     match, so "Schuldner Kreuzberg" or "Sucht 10997" narrow the search. Use it for
     questions that combine conditions or need a count, for example "how many debt
-    counselling facilities in Kreuzberg have a phone number?".
+    counselling facilities in Kreuzberg have a phone number?". For every facility of one
+    postal code use search_by_postal_code.
 
     total, missing_counts, by_provider and phone_format_counts cover all matches, not
     only the returned page. Matching is literal text, not relevance or distance; zero

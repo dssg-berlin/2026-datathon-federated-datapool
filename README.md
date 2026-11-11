@@ -99,6 +99,11 @@ comes from DHS and Sozialplattform, `+4963136120225` from Caritas. DHS and Sozia
 also give different opening hours, and the directory keeps only Sozialplattform's. The
 homepage of *Drehscheibe Kinder - und Jugendpolitik* is not in its own AWO record but
 inherited from its Träger, so it may lead to a head office.
+The server also sends short **instructions** when a client connects (`INSTRUCTIONS` in
+`server.py`). MCP clients show them to the model next to the tool list: search in German,
+never invent contact details, and give the emergency numbers first when someone is in a
+crisis.
+
 ## Prompts
 
 | Prompt | What it does |
