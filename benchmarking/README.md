@@ -46,7 +46,7 @@ Every benchmark run follows a four-stage pipeline:
 
 ## Benchmarking approaches
 
-Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in five ways:
+Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in six ways:
 
 ### 1. Zero-Cost Pipeline Verification (`--models oracle`)
 Verify tool schemas, SPARQL queries, and evaluator logic without an API key:
@@ -97,7 +97,35 @@ python -m benchmarking.run_benchmark --models litellm:openrouter/qwen/qwen-2.5-7
 
 > **Tip for Free-Tier API Keys:** Free-tier keys (such as Google AI Studio free tier) enforce strict per-minute (`5 RPM`) and daily (`20 RPD`) quotas and return HTTP `429` when burst requests arrive in parallel. Pass `--concurrency 1` and select a smaller subset of cases with `--cases` when testing with a free-tier key.
 
-### 5. Fault Injection & Chaos Testing (`--fault`)
+### 5. Local model with Ollama (no API key)
+
+`qwen-2-5-7b-ollama` in `config/models.yaml` runs `qwen2.5:7b` on a local
+[Ollama](https://ollama.com). This is how the committed [snapshots](snapshots/) were made:
+
+```bash
+ollama serve                       # skip if the Ollama app is already running
+ollama pull qwen2.5:7b             # once, 4.7 GB
+docker compose up -d --build       # the server under test on http://localhost:8000/mcp
+
+python -m benchmarking.run_benchmark --models qwen-2-5-7b-ollama \
+    --suites smoke,citizen,professional \
+    --transport streamable_http --concurrency 1 \
+    --output-dir benchmarking/snapshots/<date>_<label>
+```
+
+- **Context size.** Ollama cuts a prompt that is longer than its context window without an
+  error, and its default window (4,096 tokens) is smaller than what a request needs: the
+  model then sees only part of the tool list and picks wrong tools or none. The model entry
+  sets `extra_params: {num_ctx: 16384}`. Give any other local runner (Open WebUI, LM Studio)
+  a context of at least 16k tokens as well, or its numbers measure the cut, not the tools.
+- **`--concurrency 1`.** Ollama answers one request at a time and reuses the evaluated tool
+  list between consecutive requests; parallel cases only wait and break that reuse.
+- **Duration.** About 35 s per case on an Apple M1 with 16 GB (cases with large tool results
+  take minutes), so the three default suites take about an hour and `multilingual` another.
+- Leave out `--transport streamable_http` to start `server.py` directly instead of using
+  the container.
+
+### 6. Fault Injection & Chaos Testing (`--fault`)
 Test whether models recover gracefully or hallucinate when the MCP server experiences failures:
 
 ```bash
@@ -106,6 +134,28 @@ python -m benchmarking.run_benchmark --models gpt-4o-mini --suites smoke --fault
 ```
 
 Available fault modes: `none` (default), `timeout_30s`, `empty_payload`, `server_crash`, `missing_contact_strip`, `malformed_json`.
+
+---
+
+## Reports and snapshots
+
+Every run writes five files, named with the UTC time of the run:
+
+| File | Content |
+|---|---|
+| `benchmark-<time>.md` | The report: pass rate with confidence interval, right-tool and tool-call rates, latency, tokens; per suite; **tool confusions** (expected tool → tool the model called first); failure stages; failed runs |
+| `benchmark-<time>.json` | Everything: run metadata (server, suites, offered tools), summaries, and every run with its tool calls, evaluator scores and final answer |
+| `leaderboard-<time>.csv` | One row per model and tool profile |
+| `runs-<time>.csv` | One row per run: expected tools, first tool, all tools called, stage, failures |
+| `paired-<time>.csv` | Only with several tool profiles: per-case gains and losses |
+
+By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,
+write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.
+[snapshots/README.md](snapshots/README.md) lists the committed snapshots and compares them.
+
+Two rates describe tool calling: **right tool** (the first tool call is one of the tools
+the case accepts) and **tool call** (right tool, arguments valid against the schema and
+matching the expected values).
 
 ---
 
