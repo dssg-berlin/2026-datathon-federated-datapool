@@ -1,0 +1,18 @@
+# The image copies only server.py, src/, sparql_queries/ and one data file (see Dockerfile);
+# this keeps the build context small.
+.git
+.github
+.venv*
+venv
+env
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.env
+reports
+assets
+doc
+tests
+benchmarking
+data/*
+!data/einwohner_plz_de.csv

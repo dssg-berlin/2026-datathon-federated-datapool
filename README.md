@@ -25,7 +25,7 @@ The code for the data pool was written by Benjamin Degenhart and is available on
 
 ```text
 AI assistant (Claude Desktop, Claude Code, ...)
-   │  MCP over stdio
+   │  MCP over stdio, or streamable HTTP (Docker)
 server.py               20 MCP tools; each calls one SparqlClient method and returns JSON
    │
 src/sparql_client.py    loads a query file, fills in the parameters, sends it,
@@ -51,6 +51,7 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `data/*Schema.csv` | The original AWO CSV export. Used only by the tests; its headers define the `DATASETS` columns. |
 | `tests/` | Five test layers (unit, MCP protocol, live API, LLM connection, LLM tool-calling evals) and a live test dashboard. See [TESTS.md](TESTS.md). |
 | `benchmarking/` | LLM benchmark against the real server: multilingual, professional and smoke case suites, an agent loop over MCP, deterministic evaluators, optional rubric judge, tool-profile comparisons and leaderboards. See [benchmarking/README.md](benchmarking/README.md). |
+| `Dockerfile`, `docker-compose.yml` | Container image that serves MCP over HTTP on port 8000. See [Docker](#docker-mcp-over-http). |
 | `.github/workflows/` | CI: offline tests on every push, live API tests and LLM evals on manual trigger. |
 | `doc/` | Datathon presentations. |
 
@@ -118,8 +119,9 @@ pip install -r requirements-dev.txt   # only for running the tests
 
 ## Connecting an assistant
 
-The server speaks MCP over stdio: the assistant starts `python server.py` itself, so you
-don't run it by hand. Use **absolute paths** to the Python interpreter of your environment
+By default the server speaks MCP over stdio: the assistant starts `python server.py` itself,
+so you don't run it by hand (for a shared, already running server see
+[Docker](#docker-mcp-over-http)). Use **absolute paths** to the Python interpreter of your environment
 (`which python` / `where python` inside the activated environment) and to `server.py`.
 
 ### Claude Desktop
@@ -147,15 +149,42 @@ server then shows up under Settings → Developer with a green status.
 claude mcp add awo -- /path/to/python /path/to/awo-mcp-production/server.py
 ```
 
+### Docker (MCP over HTTP)
+
+The image serves MCP over streamable HTTP on port 8000, so one running container can be
+shared by several assistants:
+
+```bash
+docker compose up -d --build      # or: docker build -t awo-mcp . && docker run -d -p 8000:8000 awo-mcp
+curl http://localhost:8000/health # -> ok
+```
+
+The MCP endpoint is `http://localhost:8000/mcp`. Connect a client to that URL, for example:
+
+```bash
+claude mcp add --transport http awo http://localhost:8000/mcp
+```
+
+`MCP_PUBLISHED_PORT=9000 docker compose up -d` publishes another host port. The container
+runs as a non-root user, keeps no state and has no authentication: put it behind a reverse
+proxy (TLS, access control) before exposing it beyond a trusted network.
+
+Without Docker, `MCP_TRANSPORT=streamable-http python server.py` starts the same HTTP
+server on `127.0.0.1:8000`.
+
 ### Configuration
 
 | Environment variable | Default | Purpose |
 |---|---|---|
 | `SPARQL_ENDPOINT` | `https://sosuse.correlaid.org/directory/sparql` | SPARQL endpoint the tools query |
+| `MCP_TRANSPORT` | `stdio` (image: `streamable-http`) | `stdio` or `streamable-http` |
+| `MCP_HOST` | `127.0.0.1` (image: `0.0.0.0`) | Interface the HTTP server binds to |
+| `MCP_PORT` | `8000` | Port of the HTTP server (endpoint path: `/mcp`) |
 
-The server reads this from its process environment only, not from `.env` (`.env` is for
-the tests). To set it for Claude Desktop, add `"env": {"SPARQL_ENDPOINT": "..."}` to the
-server entry above.
+The server reads these from its process environment only, not from `.env` (`.env` is for
+the tests). To set one for Claude Desktop, add `"env": {"SPARQL_ENDPOINT": "..."}` to the
+server entry above; with Docker Compose, set `SPARQL_ENDPOINT` in the shell or in
+`docker-compose.yml`.
 
 ## Testing
 

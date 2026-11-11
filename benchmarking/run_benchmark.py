@@ -7,7 +7,7 @@ Examples (from the repository root):
     python -m benchmarking.run_benchmark --models gpt-4o-mini --suites smoke,professional
     python -m benchmarking.run_benchmark --models openwebui-qwen3-8b --tool-profiles baseline,all --runs 3
     python -m benchmarking.run_benchmark --models fast --judge-model gpt-4o --fault timeout_30s
-    python -m benchmarking.run_benchmark --transport streamable_http --url http://host:7860/mcp
+    python -m benchmarking.run_benchmark --transport streamable_http --url http://localhost:8000/mcp
 
 Reports go to reports/benchmark/ (git-ignored): Markdown, JSON, leaderboard CSV, runs CSV
 and, with several tool profiles, a paired comparison CSV.
