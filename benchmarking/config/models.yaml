@@ -145,3 +145,24 @@ tiers:
         supports_tool_choice: true
         cost_per_1k_input_usd: 0.0
         cost_per_1k_output_usd: 0.0
+
+  # Claude through Claude Code in headless mode (`claude -p`): no API key, it uses the
+  # Claude subscription the CLI is signed in with (`claude auth login`). See
+  # core/claude_code.py for how this differs from an API model. litellm_model is the
+  # model name passed to `claude --model`; costs are what the API would charge.
+  claude_code:
+    description: "Claude models through the Claude Code CLI (subscription login, no API key)"
+    models:
+      - id: "claude-code-haiku"
+        name: "Claude Haiku 5.5 (Claude Code)"
+        litellm_model: "claude-haiku-5-5"
+        provider: "claude-code"
+        tier: "fast"
+        timeout_seconds: 600.0
+
+      - id: "claude-code-opus"
+        name: "Claude Opus 5.5 (Claude Code)"
+        litellm_model: "claude-opus-5-5"
+        provider: "claude-code"
+        tier: "frontier"
+        timeout_seconds: 600.0

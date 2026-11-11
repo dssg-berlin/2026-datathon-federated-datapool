@@ -30,6 +30,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmarking.core.agent_loop import run_case  # noqa: E402
+from benchmarking.core import claude_code  # noqa: E402
 from benchmarking.core.cases import EvalCase, load_suites  # noqa: E402
 from benchmarking.core.mcp_client import MCPBenchmarkClient, MCPConnectionConfig  # noqa: E402
 from benchmarking.core.model_adapter import (  # noqa: E402
@@ -174,6 +175,14 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
         offered = {p: profile_tools(known_profiles[p], server_tools) for p in profiles}
 
         models: list[ModelEntryConfig] = registry.resolve(args.models)
+        fault = FaultMode(args.fault)
+        if any(m.provider == claude_code.PROVIDER for m in models):
+            # Claude Code connects to the MCP server itself (see core/claude_code.py).
+            problem = ("--offline and --fault do not work with Claude Code models"
+                       if conn.transport == "inprocess" or fault != FaultMode.NONE else await claude_code.preflight())
+            if problem:
+                print(problem, file=sys.stderr)
+                return 2
         judge = None
         if args.judge_model:
             from benchmarking.evaluators.rubric_judge import RubricJudgeEvaluator
@@ -184,16 +193,21 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                       SafetyAbstentionEvaluator(), AnswerContentEvaluator(), IriRetrievalEvaluator()]
         max_steps = args.max_steps or int(config.get("agent", {}).get("max_steps", 6))
         semaphore = asyncio.Semaphore(max(1, args.concurrency))
-        fault = FaultMode(args.fault)
 
         async def one(model_cfg: ModelEntryConfig, profile: str, case: EvalCase, run_index: int) -> RunScorecard:
             async with semaphore:
-                model = OracleChatModel(case, schemas) if model_cfg.tier == "oracle" else LiteLLMChatModel(model_cfg, retry)
-                runner = client if fault == FaultMode.NONE else FaultInjectorMiddleware(
-                    FaultInjectionConfig(mode=fault, fast_forward_sleep_seconds=0.0), downstream_client=client)
-                tools = client.openai_tools(only=offered[profile])
-                run = await run_case(model, runner, case, tools, model_id=model_cfg.id, tool_profile=profile,
-                                     run_index=run_index, max_steps=max_steps)
+                if model_cfg.provider == claude_code.PROVIDER:
+                    run = await claude_code.run_case_claude_code(
+                        model_cfg, conn, case, offered[profile], server_tools,
+                        tool_profile=profile, run_index=run_index, max_steps=max_steps)
+                else:
+                    model = (OracleChatModel(case, schemas) if model_cfg.tier == "oracle"
+                             else LiteLLMChatModel(model_cfg, retry))
+                    runner = client if fault == FaultMode.NONE else FaultInjectorMiddleware(
+                        FaultInjectionConfig(mode=fault, fast_forward_sleep_seconds=0.0), downstream_client=client)
+                    tools = client.openai_tools(only=offered[profile])
+                    run = await run_case(model, runner, case, tools, model_id=model_cfg.id, tool_profile=profile,
+                                         run_index=run_index, max_steps=max_steps)
                 results = {ev.evaluator_name: ev.evaluate(run) for ev in evaluators}
                 verdict = await judge.evaluate(run) if judge else None
                 card = build_scorecard(run, results, verdict)

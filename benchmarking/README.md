@@ -46,7 +46,7 @@ Every benchmark run follows a four-stage pipeline:
 
 ## Benchmarking approaches
 
-Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in six ways:
+Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in seven ways:
 
 ### 1. Zero-Cost Pipeline Verification (`--models oracle`)
 Verify tool schemas, SPARQL queries, and evaluator logic without an API key:
@@ -125,7 +125,26 @@ python -m benchmarking.run_benchmark --models qwen-2-5-7b-ollama \
 - Leave out `--transport streamable_http` to start `server.py` directly instead of using
   the container.
 
-### 6. Fault Injection & Chaos Testing (`--fault`)
+### 6. Claude through Claude Code (subscription login, no API key)
+
+`claude-code-haiku` and `claude-code-opus` run each case as a headless Claude Code session
+(`claude -p`) that gets only this server's tools and the benchmark's system prompt. Claude
+Code signs in with a Claude subscription, so no `ANTHROPIC_API_KEY` is needed:
+
+```bash
+claude auth login                  # once; opens the browser
+python -m benchmarking.run_benchmark --models claude-code-haiku,claude-code-opus \
+    --suites smoke,citizen,professional --transport streamable_http --concurrency 2
+```
+
+The harness looks for the CLI in `CLAUDE_CODE_BIN`, then `claude` on the `PATH`, then
+inside the Claude desktop app (macOS). Claude Code runs the tool loop and talks to the MCP
+server itself, so `--offline` and `--fault` do not apply, tool results are not cut by the
+harness, and thinking/effort are Claude Code's defaults (`core/claude_code.py`). The runs
+count against the plan's usage limits; the report's cost column is what the API would
+have charged.
+
+### 7. Fault Injection & Chaos Testing (`--fault`)
 Test whether models recover gracefully or hallucinate when the MCP server experiences failures:
 
 ```bash
@@ -264,7 +283,7 @@ benchmarking/
 ├── run_benchmark.py          CLI
 ├── config/                   eval_config.yaml (server, profiles, defaults), models.yaml
 ├── cases/                    suites (JSON) and the multilingual generator
-├── core/                     cases.py (format), mcp_client.py, model_adapter.py, agent_loop.py
+├── core/                     cases.py (format), mcp_client.py, model_adapter.py, agent_loop.py, claude_code.py
 ├── evaluators/               deterministic evaluators and the optional rubric judge
 ├── metrics/                  scorecards, summaries, Wilson intervals, paired changes
 ├── reporters/                Markdown / CSV / JSON

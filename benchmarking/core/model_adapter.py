@@ -82,7 +82,7 @@ class ModelsRegistryConfig(BaseModel):
 
     version: str = "1.0"
     default_tier: Literal["frontier", "fast", "local"] = "fast"
-    tiers: dict[Literal["frontier", "fast", "local"], ModelTierGroup]
+    tiers: dict[Literal["frontier", "fast", "local", "claude_code"], ModelTierGroup]
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ModelsRegistryConfig:
