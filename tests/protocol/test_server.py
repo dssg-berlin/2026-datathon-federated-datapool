@@ -203,3 +203,54 @@ def test_server_starts_over_stdio():
     except Exception as exc:  # noqa: BLE001 - surface any startup failure with context
         pytest.fail(f"`{sys.executable} server.py` did not start/handshake over stdio: {exc!r}")
     assert set(SMOKE_ARGS) <= set(names), f"stdio server lists {names}, missing baseline tools"
+
+
+def test_server_starts_over_streamable_http():
+    """Launch the server like the Docker image does (MCP_TRANSPORT=streamable-http)."""
+    import os
+    import socket
+    import subprocess
+    import time
+    import urllib.request
+
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    env = {**os.environ, "MCP_TRANSPORT": "streamable-http", "MCP_PORT": str(port)}
+    process = subprocess.Popen([sys.executable, "server.py"], cwd=str(ROOT), env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    async def run():
+        async with streamable_http_client(f"{base}/mcp") as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await asyncio.wait_for(session.initialize(), timeout=30)
+                return [t.name for t in (await session.list_tools()).tools]
+
+    try:
+        health = None
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(f"{base}/health", timeout=2) as response:
+                    health = response.read().decode()
+                break
+            except OSError:
+                assert process.poll() is None, "the HTTP server exited during startup"
+                time.sleep(0.1)
+        assert health == "ok", f"GET /health did not answer on port {port}"
+        names = asyncio.run(run())
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    assert set(SMOKE_ARGS) <= set(names), f"HTTP server lists {names}, missing baseline tools"
+
+
+def test_unknown_transport_is_rejected(monkeypatch):
+    import server
+
+    monkeypatch.setenv("MCP_TRANSPORT", "carrier-pigeon")
+    with pytest.raises(SystemExit, match="carrier-pigeon"):
+        server.main()

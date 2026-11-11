@@ -1,15 +1,19 @@
 """AWO MCP server: exposes the federated directory of social support services as MCP tools.
 
 Each tool calls one SparqlClient method (src/sparql_client.py), which runs the queries in
-sparql_queries/ against the live SPARQL endpoint. Run with `python server.py` (stdio).
+sparql_queries/ against the live SPARQL endpoint. Run with `python server.py` (stdio), or
+with MCP_TRANSPORT=streamable-http to serve http://MCP_HOST:MCP_PORT/mcp (see Dockerfile).
 """
 
 import functools
 import json
+import os
 import sys
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 from src.sparql_client import EndpointError, SparqlClient
 
@@ -714,7 +718,34 @@ def list_sources() -> str:
     return to_json(sparql.list_sources())
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> PlainTextResponse:
+    """Liveness probe for the HTTP deployment (Docker HEALTHCHECK); not an MCP endpoint."""
+
+    return PlainTextResponse("ok")
+
+
+def main() -> None:
+    """Start the server: stdio by default, HTTP when MCP_TRANSPORT=streamable-http."""
+
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    # stdout carries the MCP protocol over stdio, so log to stderr.
+    print(f"AWO MCP server starting ({transport})...", file=sys.stderr)
+
+    if transport == "stdio":
+        mcp.run()
+    elif transport == "streamable-http":
+        # Serves http://MCP_HOST:MCP_PORT/mcp. Stateless: every tool is one independent
+        # query, so no session survives a restart or needs a sticky load balancer.
+        mcp.run(
+            "streamable-http",
+            host=os.environ.get("MCP_HOST", "127.0.0.1"),
+            port=int(os.environ.get("MCP_PORT", "8000")),
+            stateless_http=True,
+        )
+    else:
+        sys.exit(f"Unknown MCP_TRANSPORT {transport!r}: use 'stdio' or 'streamable-http'.")
+
+
 if __name__ == "__main__":
-    # stdout carries the MCP protocol, so log to stderr.
-    print("AWO MCP server starting...", file=sys.stderr)
-    mcp.run()
+    main()
