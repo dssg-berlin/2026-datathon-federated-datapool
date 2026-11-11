@@ -66,10 +66,10 @@ python -m benchmarking.run_benchmark --models oracle --offline  # end-to-end che
 
 ### 3. Paired Tool-Profile A/B Comparison (`--tool-profiles`)
 `config/eval_config.yaml` defines tool profiles to measure how server-side tool design affects model accuracy:
-- `all`: All 20 server tools (including the three linked-search recovery tools `get_entity_card`, `search_service_candidates`, `search_directory`).
+- `all`: All server tools (including the three linked-search recovery tools `get_entity_card`, `search_service_candidates`, `search_directory`).
 - `baseline`: Hides `get_entity_card`, `search_service_candidates`, and `search_directory`.
 - `v2`: Hides only `search_directory`.
-- `datathon_original`: Offers only the original 8 CSV-era datathon tools.
+- `datathon_original`: Offers only the six CSV-era datathon tools that still exist.
 
 ```bash
 python -m benchmarking.run_benchmark --models gpt-4o-mini --suites smoke,professional \
