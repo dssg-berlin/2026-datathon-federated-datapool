@@ -144,10 +144,12 @@ Every run writes five files, named with the UTC time of the run:
 | `runs-<time>.csv` | One row per run: expected tools, first tool, all tools called, stage, failures |
 | `paired-<time>.csv` | Only with several tool profiles: per-case gains and losses |
 
-While a run is in progress, every finished case is appended to `runs-partial-<time>.jsonl`
-in the output directory (removed at the end). If a run is interrupted (laptop asleep, usage
-limit, Ctrl+C), `python -m benchmarking.run_benchmark --report-from <that file>` writes the
-reports for the cases that finished. The same option accepts a finished run's
+**Interrupted runs keep their results.** A run that is stopped (Ctrl+C, `kill`) or that
+crashes writes the same reports for the cases that had finished, marked as interrupted,
+and exits with code 130. While a run is in progress, every finished case is also appended
+to `runs-partial-<time>.jsonl` in the output directory (removed at the end): after a hard
+kill or a power loss, `python -m benchmarking.run_benchmark --report-from <that file>`
+writes the reports for the cases that finished. The same option accepts a finished run's
 `benchmark-<time>.json` and writes its reports again.
 
 By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,

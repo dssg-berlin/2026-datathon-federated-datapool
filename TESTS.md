@@ -345,6 +345,8 @@ the graph's triples (rdflib, not the `.rq` files).
 |---|---|
 | `test_every_active_case_can_be_run_on_this_server` | every active benchmark case expects at least one tool that `server.py` lists |
 | `test_aspirational_cases_really_need_missing_tools` | an aspirational case whose missing tool now exists fails, so it gets activated |
+| `test_stopped_run_writes_the_report_itself` | a run cancelled midway (Ctrl+C, `kill`) writes the report for the finished cases, marked as interrupted, and exits with 130 |
+| `test_unknown_model_points_to_the_local_models_file` | an unknown `--models` id is a clear error that names `models.local.yaml` |
 | `test_interrupted_run_keeps_its_finished_runs` | a finished run removes its `runs-partial-*.jsonl`; `--report-from` turns the partial file of an interrupted run into reports marked as interrupted |
 | `test_oracle_benchmark_runs_end_to_end_offline` | oracle run in-process on `directory.ttl`: passes with all tools, `baseline` hides `get_entity_card`, paired report and CSVs are written |
 

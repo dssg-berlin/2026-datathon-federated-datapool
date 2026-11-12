@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -213,7 +214,12 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
             return 2
         offered = {p: profile_tools(known_profiles[p], server_tools) for p in profiles}
 
-        models: list[ModelEntryConfig] = registry.resolve(args.models)
+        try:
+            models: list[ModelEntryConfig] = registry.resolve(args.models)
+        except KeyError as exc:
+            print(f"{exc.args[0]}. Your own models go into benchmarking/config/models.local.yaml "
+                  "(see models.local.example.yaml).", file=sys.stderr)
+            return 2
         fault = FaultMode(args.fault)
         # Models whose provider has an adapter (benchmarking/adapters/) are run by it, not by LiteLLM.
         for provider in sorted({m.provider for m in models}):
@@ -245,8 +251,8 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
             "judge_model": args.judge_model or None, "fault": None if fault == FaultMode.NONE else fault.value,
             "oracle_only": all(m.tier == "oracle" for m in models), "max_steps": max_steps,
         }
-        # Every finished run is appended here, so an interrupted run keeps its results
-        # (--report-from). The file is removed once the reports are written.
+        # Every finished run is appended here. A run that is stopped or crashes writes its
+        # reports itself (below); after a hard kill this file remains for --report-from.
         out_dir = Path(args.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         partial = out_dir / f"runs-partial-{started.replace(':', '').replace('-', '')[:15]}Z.jsonl"
@@ -276,15 +282,39 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 print(f"[{model_cfg.id} / {profile}] {case.suite}/{case.id} #{run_index}: {mark}", file=sys.stderr)
                 with partial.open("a", encoding="utf-8") as f:
                     f.write(card.model_dump_json() + "\n")
+                finished.append(card)
                 return card
 
-        cards = await asyncio.gather(*[
-            one(m, p, c, r) for m in models for p in profiles for c in cases for r in range(1, args.runs + 1)
-        ])
+        finished: list[RunScorecard] = []
+        tasks = [asyncio.ensure_future(one(m, p, c, r))
+                 for m in models for p in profiles for c in cases for r in range(1, args.runs + 1)]
+        try:  # `kill` (SIGTERM) stops the run like Ctrl+C does, so the report below is still written
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass  # Windows, or not the main thread
+        stopped: BaseException | None = None
+        try:
+            cards = list(await asyncio.gather(*tasks))
+        except (asyncio.CancelledError, KeyboardInterrupt, Exception) as exc:
+            # Stopped (Ctrl+C, kill) or crashed: report the runs that finished instead of losing them.
+            stopped, cards = exc, list(finished)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-    code = finish(args, meta, list(cards))
+    if stopped is None:
+        code = finish(args, meta, cards)
+        partial.unlink(missing_ok=True)
+        return code
+
+    reason = "stopped" if isinstance(stopped, (asyncio.CancelledError, KeyboardInterrupt)) else f"{type(stopped).__name__}: {stopped}"
+    print(f"benchmark {reason}: {len(cards)} of {planned} runs finished", file=sys.stderr)
+    if cards:
+        finish(args, {**meta, "interrupted": f"{len(cards)} of {planned} runs finished"}, cards)
     partial.unlink(missing_ok=True)
-    return code
+    if not isinstance(stopped, (asyncio.CancelledError, KeyboardInterrupt)):
+        raise stopped
+    return 130
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -296,7 +326,10 @@ def main(argv: list[str] | None = None) -> int:
     load_env_file()
     config = load_config(CONFIG_DIR / "eval_config.yaml")
     args = build_parser(config.get("defaults", {})).parse_args(argv)
-    return asyncio.run(benchmark(args, config))
+    try:
+        return asyncio.run(benchmark(args, config))
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":
