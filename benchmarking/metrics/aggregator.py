@@ -79,6 +79,7 @@ class GroupSummary(BaseModel):
     pass_rate_ci: ConfidenceIntervalBound
     composite_mean: float
     evaluator_pass_rates: dict[str, float]
+    right_tool_rate: float | None = None
     contact_hallucination_rate: float
     judge_complete_rate: float | None = None
     stages: dict[str, int]
@@ -133,6 +134,44 @@ def build_scorecard(run: CaseRun, results: dict[str, EvaluatorResult | None],
     )
 
 
+NO_TOOL_CALL = "(no tool call)"
+
+
+def first_tool(card: RunScorecard) -> str:
+    return card.tools_called[0] if card.tools_called else NO_TOOL_CALL
+
+
+def right_tool(card: RunScorecard) -> bool | None:
+    """Was the first tool call one of the expected tools (arguments aside)? None = no expectation."""
+    if not card.expected_tools:
+        return None
+    return first_tool(card) in card.expected_tools
+
+
+def right_tool_rate(cards: list[RunScorecard]) -> float | None:
+    graded = [ok for ok in map(right_tool, cards) if ok is not None]
+    return round(sum(graded) / len(graded), 4) if graded else None
+
+
+def tool_confusions(cards: list[RunScorecard]) -> list[tuple[str, str, int, list[str]]]:
+    """(expected tools, tool called first instead, runs, case ids), most frequent first."""
+    pairs: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for card in cards:
+        if right_tool(card) is False:
+            pairs[(", ".join(card.expected_tools), first_tool(card))].append(card.case_id)
+    rows = [(expected, called, len(ids), sorted(set(ids))) for (expected, called), ids in pairs.items()]
+    return sorted(rows, key=lambda row: (-row[2], row[0], row[1]))
+
+
+def wrong_first_tools(cards: list[RunScorecard]) -> list[tuple[str, int]]:
+    """(tool called first although it was not expected, runs), most frequent first."""
+    counts: dict[str, int] = defaultdict(int)
+    for card in cards:
+        if right_tool(card) is False:
+            counts[first_tool(card)] += 1
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
 def summarize(cards: list[RunScorecard]) -> list[GroupSummary]:
     groups: dict[tuple[str, str], list[RunScorecard]] = defaultdict(list)
     for card in cards:
@@ -161,6 +200,7 @@ def summarize(cards: list[RunScorecard]) -> list[GroupSummary]:
             pass_rate=round(passed / n, 4), pass_rate_ci=compute_wilson_confidence_interval(passed, n),
             composite_mean=round(sum(c.composite_score for c in group) / n, 4),
             evaluator_pass_rates=evaluator_rates,
+            right_tool_rate=right_tool_rate(group),
             contact_hallucination_rate=round(
                 sum(not c.evaluator_passed["contact_grounding"] for c in grounded) / len(grounded), 4) if grounded else 0.0,
             judge_complete_rate=round(sum(c.judge_level == "complete" for c in judged) / len(judged), 4) if judged else None,

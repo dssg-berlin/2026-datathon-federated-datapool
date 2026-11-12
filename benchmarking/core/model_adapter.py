@@ -37,6 +37,9 @@ DEFAULT_SYSTEM_PROMPT = (
 
 Tier = Literal["frontier", "fast", "local", "oracle"]
 
+# The user's own model entries, next to models.yaml. Not committed: see models.local.example.yaml.
+LOCAL_MODELS_FILE = "models.local.yaml"
+
 
 class ModelEntryConfig(BaseModel):
     """One model in models.yaml."""
@@ -57,12 +60,15 @@ class ModelEntryConfig(BaseModel):
     supports_tool_choice: bool = True
     cost_per_1k_input_usd: float = Field(default=0.0, ge=0.0)
     cost_per_1k_output_usd: float = Field(default=0.0, ge=0.0)
+    extra_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="provider-specific request parameters, e.g. {num_ctx: 16384} for Ollama")
 
 
 class ModelTierGroup(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    description: str
+    description: str = ""
     models: list[ModelEntryConfig] = Field(default_factory=list)
 
 
@@ -79,12 +85,30 @@ class ModelsRegistryConfig(BaseModel):
 
     version: str = "1.0"
     default_tier: Literal["frontier", "fast", "local"] = "fast"
-    tiers: dict[Literal["frontier", "fast", "local"], ModelTierGroup]
+    tiers: dict[str, ModelTierGroup]
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ModelsRegistryConfig:
         with Path(path).open("r", encoding="utf-8") as f:
             return cls.model_validate(yaml.safe_load(f))
+
+    @classmethod
+    def load(cls, config_dir: str | Path) -> ModelsRegistryConfig:
+        """models.yaml plus, when it exists, the user's own models.local.yaml (git-ignored)."""
+        registry = cls.from_yaml(Path(config_dir) / "models.yaml")
+        local = Path(config_dir) / LOCAL_MODELS_FILE
+        if local.exists():
+            registry.merge(cls.from_yaml(local))
+        return registry
+
+    def merge(self, other: ModelsRegistryConfig) -> None:
+        """Add other's models: an id that already exists is replaced, a new tier is added."""
+        for tier, group in other.tiers.items():
+            replaced = {m.id for m in group.models}
+            for existing in self.tiers.values():
+                existing.models = [m for m in existing.models if m.id not in replaced]
+            target = self.tiers.setdefault(tier, ModelTierGroup(description=group.description))
+            target.models += group.models
 
     def list_all_models(self, tier: str | None = None) -> list[ModelEntryConfig]:
         if tier is not None:
@@ -213,7 +237,7 @@ class LiteLLMChatModel:
         kwargs: dict[str, Any] = {
             "model": self.cfg.litellm_model, "messages": messages,
             "temperature": self.cfg.temperature, "max_tokens": self.cfg.max_tokens,
-            "timeout": self.cfg.timeout_seconds,
+            "timeout": self.cfg.timeout_seconds, **self.cfg.extra_params,
         }
         api_base = (os.environ.get(self.cfg.api_base_env) if self.cfg.api_base_env else None) or self.cfg.api_base
         if api_base:

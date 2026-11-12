@@ -114,6 +114,7 @@ class MCPBenchmarkClient:
         self._stack: AsyncExitStack | None = None
         self._session = None
         self.tools: list[Any] = []
+        self.instructions: str = ""  # the server's instructions, as sent on initialize
 
     async def __aenter__(self) -> MCPBenchmarkClient:
         from mcp import ClientSession, StdioServerParameters
@@ -138,7 +139,8 @@ class MCPBenchmarkClient:
                 raise ValueError(f"unknown transport {self.config.transport!r}")
 
             self._session = await self._stack.enter_async_context(ClientSession(read, write))
-            await self._session.initialize()
+            initialized = await self._session.initialize()
+            self.instructions = (getattr(initialized, "instructions", None) or "").strip()
             self.tools = list((await self._session.list_tools()).tools)
         except BaseException:
             await self.close()

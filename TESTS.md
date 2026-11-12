@@ -241,6 +241,14 @@ Offline, no LLM: scripted models, a fake tool runner, and a stand-in `litellm` m
 | `test_parse_arguments` | tool arguments: JSON object, dict, invalid JSON, non-object |
 | `test_litellm_adapter_parses_tool_calls_and_uses_api_key` | tool calls, tokens and cost parsed; `api_key_env` and `api_base` passed to LiteLLM |
 | `test_litellm_adapter_reports_missing_api_key` | a missing key is a clear failure, not a crash |
+| `test_claude_code_events_become_a_case_run` | Claude Code stream-json events → tool calls, tool results, final answer, tokens and latencies |
+| `test_claude_code_errors_and_step_limit_are_loop_errors` | "Not logged in", the turn limit and a missing result event become loop errors |
+| `test_claude_code_command_offers_only_the_profile_tools` | `claude -p` gets no built-in tools, hides tools outside the profile; MCP config for HTTP and stdio; in-process is refused |
+| `test_models_yaml_loads_and_passes_extra_params` | the shared `models.yaml` loads and holds no setup-specific entries; every Ollama entry has `num_ctx` ≥ 16k, and it reaches the LiteLLM request |
+| `test_local_models_file_overrides_and_adds` | `models.local.yaml` (here: the example file) replaces a shared entry by id and adds new models and tiers |
+| `test_comparison_of_two_results` | `benchmarking.compare`: only shared models and cases are compared; removed tools, gained and lost cases and tools called by mistake are reported; a missing folder is an error |
+| `test_adapters_are_found_by_provider` | a module in `adapters/` is found by its `PROVIDER`; other providers use the LiteLLM loop; the Claude Code adapter refuses `--offline` |
+| `test_right_tool_rate_and_tool_confusions` | right-tool rate ignores cases without an expected tool; confusions are counted per (expected, first call) |
 ### `test_provenance.py` – `explain_provenance` and `list_sources`
 
 Offline, on a small synthetic TriG dataset (`PROVENANCE` in the test file) with the same
@@ -337,6 +345,9 @@ the graph's triples (rdflib, not the `.rq` files).
 |---|---|
 | `test_every_active_case_can_be_run_on_this_server` | every active benchmark case expects at least one tool that `server.py` lists |
 | `test_aspirational_cases_really_need_missing_tools` | an aspirational case whose missing tool now exists fails, so it gets activated |
+| `test_stopped_run_writes_the_report_itself` | a run cancelled midway (Ctrl+C, `kill`) writes the report for the finished cases, marked as interrupted, and exits with 130 |
+| `test_unknown_model_points_to_the_local_models_file` | an unknown `--models` id is a clear error that names `models.local.yaml` |
+| `test_interrupted_run_keeps_its_finished_runs` | a finished run removes its `runs-partial-*.jsonl`; `--report-from` turns the partial file of an interrupted run into reports marked as interrupted |
 | `test_oracle_benchmark_runs_end_to_end_offline` | oracle run in-process on `directory.ttl`: passes with all tools, `baseline` hides `get_entity_card`, paired report and CSVs are written |
 
 ### `test_tools_e2e.py` – two end-to-end tests per feature

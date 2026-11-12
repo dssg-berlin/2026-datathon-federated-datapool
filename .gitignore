@@ -28,3 +28,6 @@ reports/
 
 # Virtualenv of the self-hosted CI runner
 .venv-ci/
+
+# Personal benchmark models (see benchmarking/config/models.local.example.yaml)
+benchmarking/config/models.local.yaml
