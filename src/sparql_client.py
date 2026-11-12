@@ -1324,6 +1324,7 @@ class SparqlClient:
                     "opening_hours": row["opening_hours"],
                     "latitude": latitude,
                     "longitude": longitude,
+                    "map_url": map_link(latitude, longitude, row["name"] or ""),
                 }
             )
 

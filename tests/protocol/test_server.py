@@ -22,20 +22,17 @@ SMOKE_ARGS = {
     "count_facilities": {"city": "Berlin"},
     "search_facilities": {"city": "Berlin"},
     "get_facility_details": {"name": "Drehscheibe"},
-    "search_services": {"query": "Suchtberatung"},
     "find_social_help": {"need": "debt", "limit": 3},
     "data_quality_report": {"organisation": ""},
     "detect_duplicates": {},
     "check_completeness": {},
     "generate_statistics": {},
-    "compare_facilities": {"facility_1": "Drehscheibe", "facility_2": "Metropolitankapitel"},
     "list_providers": {},
     "search_by_postal_code": {"postal_code": "10115"},
     "count_facilities_per_postal_code": {"postal_code_prefix": "10", "limit": 3},
     "facilities_per_inhabitant_by_region": {"level": "zone", "limit": 3},
     "records_to_fix_first": {"city": "Berlin", "n": 3},
     "find_nearby": {"location": "13353", "radius_km": 1, "query": "Sucht, Alkohol"},
-    "get_awo_details": {"iri": "https://civic-data.de/federated-directory#org-229a4e0b1081"},
     "get_entity_card": {"iri": "https://civic-data.de/federated-directory#org-34e986356c61"},
     "search_service_candidates": {"query": "Schuldner", "limit": 3},
     "search_directory": {"query": "Schuldner", "has_telephone": True},
@@ -203,3 +200,67 @@ def test_server_starts_over_stdio():
     except Exception as exc:  # noqa: BLE001 - surface any startup failure with context
         pytest.fail(f"`{sys.executable} server.py` did not start/handshake over stdio: {exc!r}")
     assert set(SMOKE_ARGS) <= set(names), f"stdio server lists {names}, missing baseline tools"
+
+
+def test_server_starts_over_streamable_http():
+    """Launch the server like the Docker image does (MCP_TRANSPORT=streamable-http)."""
+    import os
+    import socket
+    import subprocess
+    import time
+    import urllib.request
+
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    base = f"http://127.0.0.1:{port}"
+    env = {**os.environ, "MCP_TRANSPORT": "streamable-http", "MCP_PORT": str(port)}
+    process = subprocess.Popen([sys.executable, "server.py"], cwd=str(ROOT), env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    async def run():
+        async with streamable_http_client(f"{base}/mcp") as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await asyncio.wait_for(session.initialize(), timeout=30)
+                return [t.name for t in (await session.list_tools()).tools]
+
+    try:
+        health = None
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(f"{base}/health", timeout=2) as response:
+                    health = response.read().decode()
+                break
+            except OSError:
+                assert process.poll() is None, "the HTTP server exited during startup"
+                time.sleep(0.1)
+        assert health == "ok", f"GET /health did not answer on port {port}"
+        names = asyncio.run(run())
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    assert set(SMOKE_ARGS) <= set(names), f"HTTP server lists {names}, missing baseline tools"
+
+
+def test_unknown_transport_is_rejected(monkeypatch):
+    import server
+
+    monkeypatch.setenv("MCP_TRANSPORT", "carrier-pigeon")
+    with pytest.raises(SystemExit, match="carrier-pigeon"):
+        server.main()
+
+
+def test_server_sends_instructions_with_crisis_numbers():
+    """MCP clients show these to the model: no invented contacts, and crisis numbers first."""
+    from benchmarking.core.mcp_client import MCPBenchmarkClient, MCPConnectionConfig
+
+    async def run():
+        async with MCPBenchmarkClient(MCPConnectionConfig(transport="inprocess", offline=True)) as client:
+            return client.instructions
+
+    instructions = asyncio.run(run())
+    for expected in ["112", "0800 111 0 111", "Never invent", "nothing was found"]:
+        assert expected in instructions, f"server instructions are missing {expected!r}"

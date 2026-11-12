@@ -25,8 +25,8 @@ The code for the data pool was written by Benjamin Degenhart and is available on
 
 ```text
 AI assistant (Claude Desktop, Claude Code, ...)
-   │  MCP over stdio
-server.py               20 MCP tools; each calls one SparqlClient method and returns JSON
+   │  MCP over stdio, or streamable HTTP (Docker)
+server.py               19 MCP tools; each calls one SparqlClient method and returns JSON
    │
 src/sparql_client.py    loads a query file, fills in the parameters, sends it,
    │                    turns the result rows into the tool's answer
@@ -51,6 +51,7 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `data/*Schema.csv` | The original AWO CSV export. Used only by the tests; its headers define the `DATASETS` columns. |
 | `tests/` | Five test layers (unit, MCP protocol, live API, LLM connection, LLM tool-calling evals) and a live test dashboard. See [TESTS.md](TESTS.md). |
 | `benchmarking/` | LLM benchmark against the real server: multilingual, professional and smoke case suites, an agent loop over MCP, deterministic evaluators, optional rubric judge, tool-profile comparisons and leaderboards. See [benchmarking/README.md](benchmarking/README.md). |
+| `Dockerfile`, `docker-compose.yml` | Container image that serves MCP over HTTP on port 8000. See [Docker](#docker-mcp-over-http). |
 | `.github/workflows/` | CI: offline tests on every push, live API tests and LLM evals on manual trigger. |
 | `doc/` | Datathon presentations. |
 
@@ -60,9 +61,7 @@ Tools never build query strings themselves. User input only reaches a query thro
 |---|---|---|
 | `count_facilities(city)` | Number of facilities in a city | "How many facilities are in Berlin?" |
 | `search_facilities(city)` | Facilities in a city with address and contact data | "List the facilities in Berlin with their contact info" |
-| `get_facility_details(name)` | Details, address and provider of facilities whose name contains `name` | "Tell me about the facility Drehscheibe" |
-| `compare_facilities(facility_1, facility_2)` | `get_facility_details` for both names, side by side | "Compare Drehscheibe and Metropolitankapitel" |
-| `search_services(query)` | Services whose name, category or audience contains `query` | "Which services are there around Suchtberatung?" |
+| `get_facility_details(name)` | Details, address and provider of facilities whose name contains `name`. To compare two facilities, the assistant calls it once per name | "Tell me about the facility Drehscheibe", "Compare Drehscheibe and Metropolitankapitel" |
 | `find_social_help(need, limit, postal_code_prefix)` | Offers for a need (debt, housing, family, elderly, addiction, migration) with address and contacts; missing contacts are reported as not on record | "Ich habe Schulden, wo bekomme ich Hilfe?" |
 | `data_quality_report(organisation)` | Data quality scorecard per organisation (fill rate of phone, email, website, hours, category, address), what to improve, and a draft message to the organisation | "How good is the Caritas data and what should they fix?" |
 | `generate_statistics()` | Dataset sizes; facilities per city, category and provider; services per category and audience; how many facilities have an address or provider | "Give me statistics about the directory" |
@@ -73,13 +72,19 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `count_facilities_per_postal_code(postal_code_prefix, order, limit)` | Facilities, inhabitants and facilities per 10,000 inhabitants per postal code, including codes without any facility; `order` is `most_facilities`, `highest_per_10k` or `lowest_per_10k`. Inhabitants come from `data/einwohner_plz_de.csv` and are estimates (a municipality's population spread evenly over its codes) | "Which postal codes starting with 13 have the fewest facilities per inhabitant?" |
 | `facilities_per_inhabitant_by_region(level, order, postal_code_prefix, limit, min_inhabitants)` | Regions compared by facilities per 10,000 inhabitants: `level` is `zone` (first postcode digit), `region` (two digits, default) or `area` (three digits). Each region is named by its towns with the most facilities and carries inhabitants per facility and its density relative to the average. Regions under `min_inhabitants` (default 10,000) are counted but not ranked | "Where in Germany is the ratio of organisations to inhabitants the lowest?" |
 | `records_to_fix_first(city, ...)` | Facility records of a city ranked by how much fixing them matters, with reasons, provider batches and a projected coverage gain | "Which Berlin records should we fix first?" |
-| `find_nearby(location, radius_km, query, accessible_only, limit)` | Facilities within a radius of a postal code or `"latitude,longitude"`, nearest first, with distance, contacts and opening hours. `query` takes comma-separated terms and matches any of them | "Addiction counselling near 13353?" |
-| `get_awo_details(iri)` | Address, map link, contacts, opening hours, accessibility, offers, provider and source link for one facility | "What are the opening hours of this facility?" |
-| `get_entity_card(iri)` | Every recorded field of a facility, service, provider or address, the missing fields, syntax-only quality notes (e.g. a phone without leading 0) and typed links (service → facility → address/provider) | "What exactly does the directory record for this entry?" |
-| `search_service_candidates(query, limit, offset)` | Services matching name/category/audience, each with the facility or provider that runs it and its postal code and locality; paged | "Which debt counselling services are there, and which office runs each?" |
+| `find_nearby(location, radius_km, query, accessible_only, limit)` | Facilities within a radius of a postal code or `"latitude,longitude"`, nearest first, with distance, contacts, opening hours and a map link. `query` takes comma-separated terms and matches any of them | "Addiction counselling near 13353?" |
+| `get_entity_card(iri)` | Every recorded field of a facility, service, provider or address by its IRI: contacts, opening hours, accessibility, source link, the missing fields, syntax-only quality notes (e.g. a phone without leading 0) and typed links (service → facility → address/provider) | "What are the opening hours of this facility?", "What exactly does the directory record for this entry?" |
+| `search_service_candidates(query, limit, offset)` | Services matching name/category/audience, each with the facility or provider that runs it and its postal code and locality; paged | "Which services are there around Suchtberatung?", "Which office runs each debt counselling service?" |
 | `search_directory(query, provider, has_telephone, limit, offset)` | Facilities where every term matches their own text, address or a linked service; provider and phone filters; paged hits, with totals and missing-field counts over all matches | "How many debt counselling facilities in Kreuzberg have a phone number?" |
 | `explain_provenance(facility, field=None)` | For one entry (name, IRI or ID): its source records with detail pages, and per field which sources supplied each value, whether they agree and which values the directory kept or inherited | "Which sources list this facility's phone number, and do they agree?" |
 | `list_sources()` | The federated sources with declared coverage, record counts and harvest dates | "Which organisations' data is in the directory, and how current is it?" |
+
+Every tool has one job, and its description says when to use it and which neighbouring
+tool to use instead. Three tools of the datathon version were removed because agents could
+not tell them from another tool: `compare_facilities` (it called `get_facility_details`
+twice), `search_services` (a subset of `search_service_candidates`) and `get_awo_details`
+(covered by `get_entity_card`; its map link moved to `find_nearby`). The effect is
+measured in [benchmarking/snapshots](benchmarking/snapshots/README.md).
 
 Matching is case-insensitive (`GIESSEN` finds `Gießen`). City matches are **exact**, so
 `Berlin` does not include `Berlin-Mitte`. Name and service searches are substring matches.
@@ -94,6 +99,11 @@ comes from DHS and Sozialplattform, `+4963136120225` from Caritas. DHS and Sozia
 also give different opening hours, and the directory keeps only Sozialplattform's. The
 homepage of *Drehscheibe Kinder - und Jugendpolitik* is not in its own AWO record but
 inherited from its Träger, so it may lead to a head office.
+The server also sends short **instructions** when a client connects (`INSTRUCTIONS` in
+`server.py`). MCP clients show them to the model next to the tool list: search in German,
+never invent contact details, and give the emergency numbers first when someone is in a
+crisis.
+
 ## Prompts
 
 | Prompt | What it does |
@@ -118,8 +128,9 @@ pip install -r requirements-dev.txt   # only for running the tests
 
 ## Connecting an assistant
 
-The server speaks MCP over stdio: the assistant starts `python server.py` itself, so you
-don't run it by hand. Use **absolute paths** to the Python interpreter of your environment
+By default the server speaks MCP over stdio: the assistant starts `python server.py` itself,
+so you don't run it by hand (for a shared, already running server see
+[Docker](#docker-mcp-over-http)). Use **absolute paths** to the Python interpreter of your environment
 (`which python` / `where python` inside the activated environment) and to `server.py`.
 
 ### Claude Desktop
@@ -147,15 +158,42 @@ server then shows up under Settings → Developer with a green status.
 claude mcp add awo -- /path/to/python /path/to/awo-mcp-production/server.py
 ```
 
+### Docker (MCP over HTTP)
+
+The image serves MCP over streamable HTTP on port 8000, so one running container can be
+shared by several assistants:
+
+```bash
+docker compose up -d --build      # or: docker build -t awo-mcp . && docker run -d -p 8000:8000 awo-mcp
+curl http://localhost:8000/health # -> ok
+```
+
+The MCP endpoint is `http://localhost:8000/mcp`. Connect a client to that URL, for example:
+
+```bash
+claude mcp add --transport http awo http://localhost:8000/mcp
+```
+
+`MCP_PUBLISHED_PORT=9000 docker compose up -d` publishes another host port. The container
+runs as a non-root user, keeps no state and has no authentication: put it behind a reverse
+proxy (TLS, access control) before exposing it beyond a trusted network.
+
+Without Docker, `MCP_TRANSPORT=streamable-http python server.py` starts the same HTTP
+server on `127.0.0.1:8000`.
+
 ### Configuration
 
 | Environment variable | Default | Purpose |
 |---|---|---|
 | `SPARQL_ENDPOINT` | `https://sosuse.correlaid.org/directory/sparql` | SPARQL endpoint the tools query |
+| `MCP_TRANSPORT` | `stdio` (image: `streamable-http`) | `stdio` or `streamable-http` |
+| `MCP_HOST` | `127.0.0.1` (image: `0.0.0.0`) | Interface the HTTP server binds to |
+| `MCP_PORT` | `8000` | Port of the HTTP server (endpoint path: `/mcp`) |
 
-The server reads this from its process environment only, not from `.env` (`.env` is for
-the tests). To set it for Claude Desktop, add `"env": {"SPARQL_ENDPOINT": "..."}` to the
-server entry above.
+The server reads these from its process environment only, not from `.env` (`.env` is for
+the tests). To set one for Claude Desktop, add `"env": {"SPARQL_ENDPOINT": "..."}` to the
+server entry above; with Docker Compose, set `SPARQL_ENDPOINT` in the shell or in
+`docker-compose.yml`.
 
 ## Testing
 

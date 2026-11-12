@@ -46,7 +46,7 @@ Every benchmark run follows a four-stage pipeline:
 
 ## Benchmarking approaches
 
-Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in five ways:
+Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in six ways:
 
 ### 1. Zero-Cost Pipeline Verification (`--models oracle`)
 Verify tool schemas, SPARQL queries, and evaluator logic without an API key:
@@ -66,10 +66,10 @@ python -m benchmarking.run_benchmark --models oracle --offline  # end-to-end che
 
 ### 3. Paired Tool-Profile A/B Comparison (`--tool-profiles`)
 `config/eval_config.yaml` defines tool profiles to measure how server-side tool design affects model accuracy:
-- `all`: All 20 server tools (including the three linked-search recovery tools `get_entity_card`, `search_service_candidates`, `search_directory`).
+- `all`: All server tools (including the three linked-search recovery tools `get_entity_card`, `search_service_candidates`, `search_directory`).
 - `baseline`: Hides `get_entity_card`, `search_service_candidates`, and `search_directory`.
 - `v2`: Hides only `search_directory`.
-- `datathon_original`: Offers only the original 8 CSV-era datathon tools.
+- `datathon_original`: Offers only the six CSV-era datathon tools that still exist.
 
 ```bash
 python -m benchmarking.run_benchmark --models gpt-4o-mini --suites smoke,professional \
@@ -97,7 +97,30 @@ python -m benchmarking.run_benchmark --models litellm:openrouter/qwen/qwen-2.5-7
 
 > **Tip for Free-Tier API Keys:** Free-tier keys (such as Google AI Studio free tier) enforce strict per-minute (`5 RPM`) and daily (`20 RPD`) quotas and return HTTP `429` when burst requests arrive in parallel. Pass `--concurrency 1` and select a smaller subset of cases with `--cases` when testing with a free-tier key.
 
-### 5. Fault Injection & Chaos Testing (`--fault`)
+### 5. Your own models and runners
+
+The shared `config/models.yaml` holds models every contributor can select. For your own
+setup, do not edit it:
+
+- **Your models** go into `config/models.local.yaml` (git-ignored, merged on top of
+  `models.yaml` when the benchmark starts). Copy `config/models.local.example.yaml` and
+  keep what you use: another model tag, a longer timeout, provider-specific request
+  parameters (`extra_params`), a model of your own. An entry with an existing id replaces
+  the shared one.
+- **Models without an API** (a CLI, a desktop app, an agent framework) are run by an
+  adapter: a module in `adapters/` that runs one case and returns what happened. The
+  harness finds it by the `provider` of the model entry; see `adapters/__init__.py`.
+- [`recipes/`](recipes/) describes concrete setups: a local model with
+  [Ollama](recipes/ollama.md), and Claude without an API key through
+  [Claude Code](recipes/claude-code.md).
+
+> **Local runners and context size.** The server's tool definitions need about 5,000
+> tokens. A runner whose context window is smaller cuts the prompt without an error
+> (Ollama's default is 4,096 tokens), the model then sees only part of the tool list and
+> picks wrong tools or none. Give a local model at least 16k tokens; the Ollama entries in
+> `models.yaml` set `num_ctx` for this reason.
+
+### 6. Fault Injection & Chaos Testing (`--fault`)
 Test whether models recover gracefully or hallucinate when the MCP server experiences failures:
 
 ```bash
@@ -106,6 +129,47 @@ python -m benchmarking.run_benchmark --models gpt-4o-mini --suites smoke --fault
 ```
 
 Available fault modes: `none` (default), `timeout_30s`, `empty_payload`, `server_crash`, `missing_contact_strip`, `malformed_json`.
+
+---
+
+## Reports and snapshots
+
+Every run writes five files, named with the UTC time of the run:
+
+| File | Content |
+|---|---|
+| `benchmark-<time>.md` | The report: pass rate with confidence interval, right-tool and tool-call rates, latency, tokens; per suite; **tool confusions** (expected tool → tool the model called first); failure stages; failed runs |
+| `benchmark-<time>.json` | Everything: run metadata (server, suites, offered tools), summaries, and every run with its tool calls, evaluator scores and final answer |
+| `leaderboard-<time>.csv` | One row per model and tool profile |
+| `runs-<time>.csv` | One row per run: expected tools, first tool, all tools called, stage, failures |
+| `paired-<time>.csv` | Only with several tool profiles: per-case gains and losses |
+
+**Interrupted runs keep their results.** A run that is stopped (Ctrl+C, `kill`) or that
+crashes writes the same reports for the cases that had finished, marked as interrupted,
+and exits with code 130. While a run is in progress, every finished case is also appended
+to `runs-partial-<time>.jsonl` in the output directory (removed at the end): after a hard
+kill or a power loss, `python -m benchmarking.run_benchmark --report-from <that file>`
+writes the reports for the cases that finished. The same option accepts a finished run's
+`benchmark-<time>.json` and writes its reports again.
+
+By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,
+write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.
+Git ignores the `benchmark-*.json` files there: they hold every answer and tool call and
+run to thousands of lines. Keep them locally for `benchmarking.compare` and commit its
+Markdown output instead.
+[snapshots/README.md](snapshots/README.md) lists the committed snapshots; they are examples of
+one contributor's setup, not a required way to test.
+
+**Comparing two results.** `python -m benchmarking.compare <before> <after>` writes a
+Markdown comparison of two results, for example before and after a change to the server:
+pass, right-tool and tool-call rates per model and suite, the cases that were gained and
+lost, and the tools called by mistake. Each side is a `benchmark-*.json` or a folder with
+such files (one subfolder per model is fine); `--labels` names the two sides and `--output`
+writes a file. Only models, tool profiles and cases that both sides ran are compared.
+
+Two rates describe tool calling: **right tool** (the first tool call is one of the tools
+the case accepts) and **tool call** (right tool, arguments valid against the schema and
+matching the expected values).
 
 ---
 
@@ -145,7 +209,7 @@ Be careful to distinguish between real LLM measurements and simulated/stand-in r
 | `--concurrency 4` | number of case runs executed in parallel (lower to `1` for rate-limited keys) |
 | `--judge-model gpt-4o` | add the rubric judge (reported next to the deterministic pass/fail) |
 | `--fault timeout_30s` | inject a simulated fault into the first call of each tool (`empty_payload`, `server_crash`, `missing_contact_strip`, `malformed_json`) |
-| `--transport streamable_http --url http://host:7860/mcp` | benchmark a deployed server instead of starting `server.py` |
+| `--transport streamable_http --url http://localhost:8000/mcp` | benchmark a deployed server instead of starting `server.py` |
 | `--sparql-endpoint URL` | start `server.py` against another SPARQL endpoint |
 | `--offline` | run `server.py` in-process on `data/directory.ttl` (no network; numbers differ from live) |
 | `--fail-under 0.8` | exit code 1 when a pass rate is below 80 % (for CI) |
@@ -212,12 +276,14 @@ give pass rates with **Wilson 95 % intervals**; with tens of cases they are wide
 ```text
 benchmarking/
 ├── run_benchmark.py          CLI
-├── config/                   eval_config.yaml (server, profiles, defaults), models.yaml
+├── config/                   eval_config.yaml (server, profiles, defaults), models.yaml, models.local.yaml (yours)
 ├── cases/                    suites (JSON) and the multilingual generator
 ├── core/                     cases.py (format), mcp_client.py, model_adapter.py, agent_loop.py
+├── adapters/                 optional runners for models without an API (found by `provider`)
+├── recipes/                  how-tos for concrete setups (Ollama, Claude Code)
 ├── evaluators/               deterministic evaluators and the optional rubric judge
 ├── metrics/                  scorecards, summaries, Wilson intervals, paired changes
-├── reporters/                Markdown / CSV / JSON
+├── reporters/                Markdown / CSV / JSON, and the comparison of two results (compare.py is its CLI)
 └── stress_chaos/             fault injection between the agent loop and the server
 ```
 

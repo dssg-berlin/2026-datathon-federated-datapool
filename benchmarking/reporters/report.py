@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from benchmarking.metrics.aggregator import GroupSummary, PairedChange, RunScorecard
+from benchmarking.metrics.aggregator import (
+    GroupSummary, PairedChange, RunScorecard, first_tool, right_tool, right_tool_rate, tool_confusions,
+    wrong_first_tools,
+)
 
 
 def _pct(value: float | None) -> str:
@@ -25,22 +28,54 @@ def markdown_report(meta: dict[str, Any], summaries: list[GroupSummary], cards: 
     if meta.get("oracle_only"):
         lines.append("- **Oracle run: a scripted stand-in called the expected tools. This checks the pipeline "
                      "and the server; it is not a model measurement.**")
+    if meta.get("interrupted"):
+        lines.append(f"- **Interrupted run: {meta['interrupted']}. The numbers cover only those runs.**")
     if meta.get("fault"):
         lines.append(f"- fault injection: `{meta['fault']}`")
     lines += [
         "", "Pass = every applicable deterministic check passed. 95 % Wilson interval in brackets; "
-        "with few cases the intervals are wide, so small differences are not meaningful.", "",
-        "| model | tool profile | pass | 95 % CI | composite | tool choice | contact hallucination | judge complete | tokens | cost $ |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "with few cases the intervals are wide, so small differences are not meaningful. "
+        "Right tool = the first tool call was an expected tool; tool call = right tool with valid, "
+        "expected arguments.", "",
+        "| model | tool profile | pass | 95 % CI | composite | right tool | tool call | contact hallucination "
+        "| judge complete | latency p50 / p95 s | tokens | cost $ |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s in summaries:
         ci = s.pass_rate_ci
         lines.append(
             f"| {s.model_id} | {s.tool_profile} | {s.passed}/{s.runs} ({_pct(s.pass_rate)}) | "
             f"{_pct(ci.wilson_lower)}–{_pct(ci.wilson_upper)} | {s.composite_mean:.2f} | "
-            f"{_pct(s.evaluator_pass_rates.get('tool_selection'))} | {_pct(s.contact_hallucination_rate)} | "
-            f"{_pct(s.judge_complete_rate)} | {s.total_tokens} | {s.total_cost_usd:.4f} |"
+            f"{_pct(s.right_tool_rate)} | {_pct(s.evaluator_pass_rates.get('tool_selection'))} | "
+            f"{_pct(s.contact_hallucination_rate)} | {_pct(s.judge_complete_rate)} | "
+            f"{s.latency.p50_ms / 1000:.0f} / {s.latency.p95_ms / 1000:.0f} | {s.total_tokens} | {s.total_cost_usd:.4f} |"
         )
+
+    lines += ["", "## Per suite", "", "| model | tool profile | suite | pass | right tool | tool call |",
+              "|---|---|---|---|---|---|"]
+    for s in summaries:
+        group = [c for c in cards if (c.model_id, c.tool_profile) == (s.model_id, s.tool_profile)]
+        for suite in sorted({c.suite for c in group}):
+            runs = [c for c in group if c.suite == suite]
+            graded = [c.evaluator_passed["tool_selection"] for c in runs if "tool_selection" in c.evaluator_passed]
+            lines.append(
+                f"| {s.model_id} | {s.tool_profile} | {suite} | {sum(c.passed for c in runs)}/{len(runs)} "
+                f"({_pct(sum(c.passed for c in runs) / len(runs))}) | {_pct(right_tool_rate(runs))} | "
+                f"{_pct(sum(graded) / len(graded) if graded else None)} |")
+
+    lines += ["", "## Tool confusions", "",
+              "Runs whose first tool call was not an expected tool: which tool the model took instead.", "",
+              "| model | tool profile | expected | called first | runs | cases |", "|---|---|---|---|---|---|"]
+    for s in summaries:
+        group = [c for c in cards if (c.model_id, c.tool_profile) == (s.model_id, s.tool_profile)]
+        for expected, called, count, case_ids in tool_confusions(group):
+            lines.append(f"| {s.model_id} | {s.tool_profile} | {expected} | {called} | {count} | {', '.join(case_ids)} |")
+    for s in summaries:
+        group = [c for c in cards if (c.model_id, c.tool_profile) == (s.model_id, s.tool_profile)]
+        wrong = wrong_first_tools(group)
+        if wrong:
+            lines += ["", f"{s.model_id} / {s.tool_profile}, tools called first by mistake: "
+                      + ", ".join(f"`{name}` ({count})" for name, count in wrong)]
 
     lines += ["", "## Where runs failed", "", "| model | tool profile | stage | runs |", "|---|---|---|---|"]
     for s in summaries:
@@ -103,22 +138,24 @@ def write_reports(output_dir: str | Path, meta: dict[str, Any], summaries: list[
     with paths["leaderboard"].open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["model", "tool_profile", "runs", "passed", "pass_rate", "ci_lower", "ci_upper",
-                         "composite_mean", "tool_selection_pass_rate", "contact_hallucination_rate",
+                         "composite_mean", "right_tool_rate", "tool_selection_pass_rate", "contact_hallucination_rate",
                          "judge_complete_rate", "latency_p50_ms", "latency_p95_ms", "total_tokens", "total_cost_usd"])
         for s in summaries:
             writer.writerow([s.model_id, s.tool_profile, s.runs, s.passed, s.pass_rate, s.pass_rate_ci.wilson_lower,
-                             s.pass_rate_ci.wilson_upper, s.composite_mean, s.evaluator_pass_rates.get("tool_selection"),
+                             s.pass_rate_ci.wilson_upper, s.composite_mean, s.right_tool_rate,
+                             s.evaluator_pass_rates.get("tool_selection"),
                              s.contact_hallucination_rate, s.judge_complete_rate, s.latency.p50_ms, s.latency.p95_ms,
                              s.total_tokens, s.total_cost_usd])
 
     with paths["runs"].open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["model", "tool_profile", "suite", "case_id", "run", "section", "language", "passed",
-                         "stage", "composite", "expected_tools", "tools_called", "judge_level", "steps",
+                         "stage", "composite", "expected_tools", "first_tool", "right_tool", "tools_called", "judge_level", "steps",
                          "tool_errors", "tokens", "failures"])
         for c in cards:
             writer.writerow([c.model_id, c.tool_profile, c.suite, c.case_id, c.run_index, c.section, c.language,
                              c.passed, c.stage, c.composite_score, " ".join(c.expected_tools),
+                             first_tool(c), "" if right_tool(c) is None else right_tool(c),
                              " ".join(c.tools_called), c.judge_level or "", c.steps, c.tool_errors,
                              c.total_tokens, " | ".join(c.failures)])
 

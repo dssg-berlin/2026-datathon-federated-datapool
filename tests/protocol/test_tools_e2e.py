@@ -210,56 +210,6 @@ def test_e2e_get_facility_details_includes_address_and_provider(graph):
     }, f"provider of {facility} differs from its schema:parentOrganization in the graph"
 
 
-# ---- compare_facilities ----------------------------------------------------------
-
-def test_e2e_compare_facilities_equals_two_detail_lookups():
-    result = call_json("compare_facilities",
-                       {"facility_1": "Drehscheibe", "facility_2": "Metropolitankapitel"})
-    expected = [
-        {"search_name": name, "matches": call_json("get_facility_details", {"name": name})}
-        for name in ["Drehscheibe", "Metropolitankapitel"]
-    ]
-    assert result == expected, "compare_facilities differs from two get_facility_details calls"
-    assert all(side["matches"] for side in result), "both sides should find a facility"
-
-
-def test_e2e_compare_facilities_keeps_order_and_reports_unknown_as_empty():
-    result = call_json("compare_facilities",
-                       {"facility_1": "Gibt es nicht", "facility_2": "Drehscheibe"}, once=False)
-    assert [side["search_name"] for side in result] == ["Gibt es nicht", "Drehscheibe"]
-    assert result[0]["matches"] == [], f"unknown facility should match nothing: {result[0]}"
-    assert result[1]["matches"], "Drehscheibe should still be found as the second facility"
-
-
-# ---- search_services -------------------------------------------------------------
-
-def test_e2e_search_services_matches_name_category_or_audience(graph):
-    # "Medikament" often appears only in the audience, so all three fields are needed.
-    results = call_json("search_services", {"query": "MEDIKAMENT"}, once=False)
-
-    def matches(service, *predicates):
-        return any("medikament" in fold(value(graph, service, p)) for p in predicates)
-
-    services = set(graph.subjects(RDF.type, SCHEMA.Service))
-    expected = {str(s) for s in services if matches(s, SCHEMA.name, SCHEMA.category, SCHEMA.audience)}
-    audience_only = {str(s) for s in services
-                     if matches(s, SCHEMA.audience) and not matches(s, SCHEMA.name, SCHEMA.category)}
-    assert audience_only, "test data should contain services matching only by audience"
-    found = [result["iri"] for result in results]
-    assert len(found) == len(set(found)), "search_services(MEDIKAMENT) lists a service twice"
-    assert set(found) == expected, (
-        f"search_services(MEDIKAMENT): missing {sorted(expected - set(found))[:3]}, "
-        f"unexpected {sorted(set(found) - expected)[:3]}"
-    )
-
-
-def test_e2e_search_services_no_match_and_quotes_stay_literal():
-    for query in ["Gibt es nicht", '") || true || ("']:
-        assert call_json("search_services", {"query": query}, once=False) == [], (
-            f"search_services({query!r}) should find nothing"
-        )
-
-
 # ---- find_social_help ------------------------------------------------------------
 
 def help_services(graph, need):
@@ -633,6 +583,10 @@ def test_e2e_find_nearby_matches_distances_from_the_graph(graph):
         assert distance == pytest.approx(expected[iri], abs=0.01), iri
     distances = [item["distance_km"] for item in result["results"]]
     assert distances == sorted(distances), "results must be nearest first"
+    for item in result["results"]:
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(item["map_url"]).query)["query"][0]
+        assert [float(part) for part in query.split(",")] == [item["latitude"], item["longitude"]], (
+            f"map link should point at the facility's coordinates: {item['map_url']}")
 
 
 def test_e2e_find_nearby_unresolvable_location_reports_error():
@@ -642,30 +596,6 @@ def test_e2e_find_nearby_unresolvable_location_reports_error():
     assert result["results"] == [] and "error" in result, (
         f"find_nearby with a street name should return an 'error' and no results, got: {text[:200]!r}"
     )
-
-
-# ---- get_awo_details -------------------------------------------------------------
-
-def test_e2e_get_awo_details_known_facility_matches_graph(graph):
-    iri = CDF + "org-229a4e0b1081"
-    result = call_json("get_awo_details", {"iri": iri})
-    facility = URIRef(iri)
-    address = address_of(graph, facility)
-    for key, predicate in [("name", SCHEMA.name), ("telephone", SCHEMA.telephone),
-                           ("email", SCHEMA.email), ("opening_hours", SCHEMA.openingHours)]:
-        assert result[key] == value(graph, facility, predicate), f"get_awo_details {key}"
-    for part in (SCHEMA.streetAddress, SCHEMA.postalCode, SCHEMA.addressLocality):
-        assert value(graph, address, part) in result["address"], result["address"]
-    query = urllib.parse.parse_qs(urllib.parse.urlparse(result["map_url"]).query)["query"][0]
-    assert [float(part) for part in query.split(",")] == [
-        float(value(graph, address, SCHEMA.latitude)), float(value(graph, address, SCHEMA.longitude))
-    ], f"map link should point at the address coordinates: {result['map_url']}"
-
-
-def test_e2e_get_awo_details_unknown_iri_is_a_message_not_an_error():
-    is_error, text = mcp_call("get_awo_details", {"iri": "https://civic-data.de/federated-directory#nope"})
-    assert not is_error, f"get_awo_details(<unknown iri>) returned an MCP error: {text[:200]!r}"
-    assert text.startswith("No facility found"), f"expected a 'No facility found' message, got: {text[:200]!r}"
 
 
 # ---- get_entity_card -------------------------------------------------------------
@@ -902,7 +832,7 @@ def test_e2e_find_help_prompt_is_listed_and_renders():
     )
 
     text = mcp_get_prompt("find_help", {"situation": "Ich trinke zu viel", "location": "13353"})
-    for expected in ["Ich trinke zu viel", "13353", "find_nearby", "get_awo_details", "112"]:
+    for expected in ["Ich trinke zu viel", "13353", "find_nearby", "get_entity_card", "112"]:
         assert expected in text, f"rendered find_help prompt is missing {expected!r}"
     assert "{" not in text.replace("{{", ""), "rendered find_help prompt has an unfilled {placeholder}"
 
@@ -914,13 +844,17 @@ def test_e2e_find_help_prompt_only_uses_tools_and_arguments_that_exist():
     text = mcp_get_prompt("find_help", {"situation": "Wohnungsverlust", "location": "10115"})
     tools = {tool.name: tool for tool in mcp_list_tools()}
     named_tools = {name for name in re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", text) if name in tools}
-    assert named_tools == {"find_nearby", "get_awo_details"}, named_tools
+    assert named_tools == {"find_nearby", "get_entity_card"}, named_tools
     nearby_arguments = set(tools["find_nearby"].input_schema["properties"])
     for argument in ["radius_km", "accessible_only"]:
         assert argument in text and argument in nearby_arguments, (
             f"find_help tells the model to set {argument!r}, find_nearby takes {sorted(nearby_arguments)}"
         )
-    sample = call_json("get_awo_details", {"iri": CDF + "org-229a4e0b1081"})
-    assert "source_url" in text and "source_url" in sample, (
-        "find_help refers to source_url, which get_awo_details must return"
+    card = call_json("get_entity_card", {"iri": CDF + "org-229a4e0b1081"})
+    assert "source_page" in text and "source_page" in card["fields"], (
+        "find_help refers to source_page, which get_entity_card must return for a facility"
+    )
+    nearby = call_json("find_nearby", {"location": "13353", "radius_km": 1, "limit": 1})
+    assert "map_url" in text and "map_url" in nearby["results"][0], (
+        "find_help refers to map_url, which find_nearby must return"
     )

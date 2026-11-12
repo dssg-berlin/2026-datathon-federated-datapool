@@ -284,22 +284,14 @@ MCP_CASES = {
     "count_facilities": ({"city": "Berlin"}, "count_facilities", ("Berlin",)),
     "search_facilities": ({"city": "Berlin"}, "search_facilities", ("Berlin",)),
     "get_facility_details": ({"name": "Drehscheibe"}, "get_facility_details", ("Drehscheibe",)),
-    "search_services": ({"query": "Suchtberatung"}, "search_services", ("Suchtberatung",)),
     "find_social_help": ({"need": "debt", "limit": 3}, "find_help", ("debt", 3)),
     "data_quality_report": ({"organisation": ""}, "data_quality_report", ("",)),
     "detect_duplicates": ({}, "detect_duplicates", ()),
     "check_completeness": ({}, "check_completeness", ()),
     "generate_statistics": ({}, "generate_statistics", ()),
-    "compare_facilities": (
-        {"facility_1": "Drehscheibe", "facility_2": "Metropolitankapitel"},
-        "compare_facilities", ("Drehscheibe", "Metropolitankapitel"),
-    ),
     "find_nearby": (
         {"location": "10115", "radius_km": 1, "query": "Beratung"},
         "find_nearby", ("10115", 1.0, "Beratung"),
-    ),
-    "get_awo_details": (
-        {"iri": KNOWN_FACILITY_IRI}, "get_awo_details", (KNOWN_FACILITY_IRI,),
     ),
     "get_entity_card": (
         {"iri": KNOWN_FACILITY_IRI}, "get_entity_card", (KNOWN_FACILITY_IRI,),

@@ -307,3 +307,178 @@ def test_litellm_adapter_reports_missing_api_key(monkeypatch):
     cfg = ModelEntryConfig(id="m", name="m", litellm_model="x", provider="p", tier="fast", api_key_env="MISSING_KEY")
     result = asyncio.run(LiteLLMChatModel(cfg).complete([], []))
     assert not result.success and "MISSING_KEY" in result.error_message
+
+
+# ---- runner adapters (adapters/), local model file and report additions --------------
+
+def test_claude_code_events_become_a_case_run():
+    from benchmarking.adapters import claude_code
+    from benchmarking.core.agent_loop import CaseRun
+
+    events = [
+        {"type": "system", "subtype": "init"},
+        {"type": "assistant", "message": {"content": [
+            {"type": "thinking", "thinking": ""},
+            {"type": "tool_use", "id": "t1", "name": "mcp__awo__count_facilities", "input": {"city": "Berlin"}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "646"}]}]}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "There are 646."}]}},
+        {"type": "result", "subtype": "success", "is_error": False, "result": "There are 646.", "num_turns": 2,
+         "total_cost_usd": 0.01, "duration_ms": 5000, "duration_api_ms": 4000,
+         "usage": {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 20}},
+    ]
+    run = CaseRun(case=case(), model_id="claude-code-haiku", tool_profile="all", run_index=1,
+                  offered_tools=["count_facilities"])
+    claude_code.apply_events(run, events, max_steps=6)
+    assert [(c.tool_name, c.arguments) for c in run.tool_calls] == [("count_facilities", {"city": "Berlin"})]
+    assert run.tool_results[0].success and run.tool_results[0].text == "646"
+    assert run.final_answer == "There are 646." and not run.loop_error and run.steps == 2
+    assert run.usage.total_tokens == 120 and run.model_latency_ms == 4000 and run.tool_latency_ms == 1000
+
+
+def test_claude_code_errors_and_step_limit_are_loop_errors():
+    from benchmarking.adapters import claude_code
+    from benchmarking.core.agent_loop import CaseRun
+
+    def run_with(final):
+        run = CaseRun(case=case(), model_id="m", tool_profile="all", run_index=1, offered_tools=[])
+        claude_code.apply_events(run, [final] if final else [], max_steps=6)
+        return run.loop_error
+
+    assert "Not logged in" in run_with({"type": "result", "is_error": True, "result": "Not logged in · Please run /login"})
+    assert "after 6 steps" in run_with({"type": "result", "subtype": "error_max_turns", "is_error": True})
+    assert "without a result" in run_with(None)
+
+
+def test_claude_code_command_offers_only_the_profile_tools():
+    from benchmarking.adapters import claude_code
+    from benchmarking.core.mcp_client import MCPConnectionConfig
+
+    cfg = ModelEntryConfig(id="claude-code-haiku", name="h", litellm_model="claude-haiku-5-5",
+                           provider="claude-code", tier="fast", extra_params={"effort": "low"})
+    cmd = claude_code.command("claude", cfg, "Hallo", "/tmp/mcp.json", ["search_directory"], 6, "system")
+    assert cmd[cmd.index("--model") + 1] == "claude-haiku-5-5" and cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--disallowedTools") + 1] == "mcp__awo__search_directory"
+    assert cmd[cmd.index("--effort") + 1] == "low" and "--strict-mcp-config" in cmd
+    http = MCPConnectionConfig(transport="streamable_http", url="http://localhost:8000/mcp")
+    assert claude_code.mcp_server_config(http) == {"type": "http", "url": "http://localhost:8000/mcp"}
+    stdio = claude_code.mcp_server_config(MCPConnectionConfig(transport="stdio"))
+    assert stdio["args"][0].endswith("server.py") and stdio["args"][0].startswith("/")
+    with pytest.raises(ValueError):
+        claude_code.mcp_server_config(MCPConnectionConfig(transport="inprocess"))
+
+
+def test_models_yaml_loads_and_passes_extra_params(monkeypatch):
+    from benchmarking.core.model_adapter import ModelsRegistryConfig
+    from benchmarking.run_benchmark import CONFIG_DIR
+
+    registry = ModelsRegistryConfig.from_yaml(CONFIG_DIR / "models.yaml")
+    assert not [m.id for m in registry.list_all_models() if m.provider == "claude-code"], (
+        "setup-specific entries belong in models.local.yaml, not in the shared models.yaml")
+    for model in registry.list_all_models():
+        if model.provider == "ollama":  # the tool list alone needs ~5,000 tokens
+            assert model.extra_params.get("num_ctx", 0) >= 16384, f"{model.id} would cut the tool list"
+    ollama = registry.get_model("qwen-2-5-7b-ollama")
+
+    seen = {}
+
+    async def acompletion(**kwargs):
+        seen.update(kwargs)
+        message = types.SimpleNamespace(content="ok", tool_calls=None)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message, finish_reason="stop")],
+                                     usage=types.SimpleNamespace(prompt_tokens=1, completion_tokens=1))
+
+    monkeypatch.setitem(sys.modules, "litellm", types.SimpleNamespace(acompletion=acompletion, drop_params=False))
+    asyncio.run(LiteLLMChatModel(ollama, RetryPolicyConfig(max_retries=0)).complete([], TOOLS))
+    assert seen["num_ctx"] == ollama.extra_params["num_ctx"]
+
+
+def test_right_tool_rate_and_tool_confusions():
+    from benchmarking.metrics.aggregator import RunScorecard, right_tool_rate, tool_confusions, wrong_first_tools
+
+    def card(case_id, expected, called):
+        return RunScorecard(
+            model_id="m", tool_profile="all", suite="smoke", case_id=case_id, run_index=1, section="smoke",
+            language="", expected_tools=expected, tools_called=called, passed=False, stage="", composite_score=0.0,
+            evaluator_scores={}, evaluator_passed={}, steps=1, tool_errors=0, total_tokens=0,
+            estimated_cost_usd=0.0, model_latency_ms=0.0, tool_latency_ms=0.0, final_answer="")
+
+    cards = [card("a", ["find_social_help"], ["find_social_help"]),
+             card("b", ["find_social_help"], ["count_facilities", "find_social_help"]),
+             card("c", ["find_social_help"], ["count_facilities"]), card("d", ["count_facilities"], []),
+             card("e", [], ["count_facilities"])]
+    assert right_tool_rate(cards) == 0.25  # case e expects no tool and is not graded
+    assert tool_confusions(cards) == [("find_social_help", "count_facilities", 2, ["b", "c"]),
+                                      ("count_facilities", "(no tool call)", 1, ["d"])]
+    assert wrong_first_tools(cards) == [("count_facilities", 2), ("(no tool call)", 1)]
+
+
+def test_local_models_file_overrides_and_adds(tmp_path):
+    from benchmarking.core.model_adapter import ModelsRegistryConfig
+    from benchmarking.run_benchmark import CONFIG_DIR
+
+    (tmp_path / "models.yaml").write_text((CONFIG_DIR / "models.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    shared = ModelsRegistryConfig.load(tmp_path)
+    assert shared.get_model("qwen-2-5-7b-ollama").timeout_seconds == 60.0
+
+    # The example file is what a user copies; it must load and merge.
+    (tmp_path / "models.local.yaml").write_text(
+        (CONFIG_DIR / "models.local.example.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    merged = ModelsRegistryConfig.load(tmp_path)
+    mine = merged.get_model("qwen-2-5-7b-ollama")
+    assert mine.litellm_model == "ollama_chat/qwen2.5:7b" and mine.timeout_seconds == 900.0
+    assert [m.id for m in merged.list_all_models()].count("qwen-2-5-7b-ollama") == 1, "an overridden id exists once"
+    assert {m.id for m in merged.resolve("claude_code")} == {"claude-code-haiku", "claude-code-opus"}
+    assert len(merged.list_all_models()) == len(shared.list_all_models()) + 2
+
+
+def test_adapters_are_found_by_provider():
+    from benchmarking import adapters
+
+    claude = adapters.for_provider("claude-code")
+    assert claude is not None and callable(claude.run_case) and callable(claude.preflight)
+    assert adapters.for_provider("openai") is None, "providers without an adapter use the LiteLLM loop"
+    from benchmarking.core.mcp_client import MCPConnectionConfig
+    refused = asyncio.run(claude.preflight(MCPConnectionConfig(transport="inprocess"), False))
+    assert "--offline" in refused
+
+
+def test_comparison_of_two_results(tmp_path):
+    from benchmarking.compare import main as compare_main
+    from benchmarking.metrics.aggregator import RunScorecard
+    from benchmarking.reporters.comparison import comparison_markdown, load_results
+
+    def card(case_id, called, passed, model="m"):
+        return RunScorecard(
+            model_id=model, tool_profile="all", suite="smoke", case_id=case_id, run_index=1, section="smoke",
+            language="", expected_tools=["find_social_help"], tools_called=called, passed=passed,
+            stage="" if passed else "wrong tool chosen", composite_score=1.0 if passed else 0.0,
+            evaluator_scores={}, evaluator_passed={"tool_selection": passed, "contact_grounding": True},
+            steps=1, tool_errors=0, total_tokens=100, estimated_cost_usd=0.0, model_latency_ms=0.0,
+            tool_latency_ms=0.0, final_answer="")
+
+    def write(folder, cards, tools):
+        (tmp_path / folder / "model-a").mkdir(parents=True)
+        (tmp_path / folder / "model-a" / "benchmark-1.json").write_text(json.dumps({
+            "meta": {"server": folder, "started_at": "2026-01-01", "offered_tools": {"all": tools}},
+            "runs": [c.model_dump() for c in cards]}), encoding="utf-8")
+
+    write("before", [card("a", ["count_facilities"], False), card("b", ["find_social_help"], True),
+                     card("c", ["find_social_help"], True), card("only-before", ["find_social_help"], True),
+                     card("a", ["find_social_help"], True, model="other")],
+          ["find_social_help", "count_facilities", "old_tool"])
+    write("after", [card("a", ["find_social_help"], True), card("b", ["find_social_help"], True),
+                    card("c", ["count_facilities"], False)], ["find_social_help", "count_facilities"])
+
+    before, before_metas = load_results(tmp_path / "before")
+    after, after_metas = load_results(tmp_path / "after")
+    text = comparison_markdown(before, after, before_metas, after_metas, labels=("old", "new"))
+    assert "| m | all | 3 | 2/3 (67%) | 2/3 (67%) |" in text, "only the three shared cases, and an unchanged rate once"
+    assert "tools removed: `old_tool`" in text and "other / all" in text and "1 case(s) ran on one side only" in text
+    assert "1 gained, 1 lost" in text and "lost: `c` (wrong tool chosen)" in text and "gained: `a`" in text
+    assert "| m | all | `count_facilities` 1 | `count_facilities` 1 |" in text
+
+    output = tmp_path / "comparison.md"
+    assert compare_main([str(tmp_path / "before"), str(tmp_path / "after"), "--output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8").startswith("# Benchmark comparison: before → after")
+    assert compare_main([str(tmp_path / "missing"), str(tmp_path / "after")]) == 2

@@ -61,7 +61,7 @@ Named graphs hold the pipeline behind the directory (`urn:directory:data/pipelin
   some addresses lack coordinates, and several facilities may share one address.
 * **Big answers.** `generate_statistics` returns ~5,800 cities and `check_completeness` /
   `detect_duplicates` scan all ~67k entities (5–15 s). An empty name/query in
-  `get_facility_details` / `search_services` matches everything (as in the CSV version).
+  `get_facility_details` matches everything (as in the CSV version).
 * **No paging in the client yet.** Large `list_*` queries return everything at once. Add
   `LIMIT`/`OFFSET` in the query file when a tool needs paging.
 * **`SparqlClient.query` parses JSON only**, so it is meant for `SELECT` and `ASK`.
@@ -143,9 +143,9 @@ service matches are substrings (`CONTAINS`, no regex). Statistics trim values wi
 | `list_facilities_by_city.rq` | facility + address + contact rows for a city | `search_facilities` |
 | `list_facilities_by_postal_code.rq` | facility + address + contact rows for a postal code | `search_by_postal_code` |
 | `list_providers.rq` | providers with homepage and address | `list_providers`, `records_to_fix_first` |
-| `list_facility_details_by_name.rq` | facility details, address and provider for a name substring | `get_facility_details`, `compare_facilities` |
+| `list_facility_details_by_name.rq` | facility details, address and provider for a name substring | `get_facility_details` |
 | `list_facility_quality_fields_by_city.rq` | every field the data quality ranking checks, for the facilities of a city | `records_to_fix_first` |
-| `list_services_by_query.rq` | services whose name/category/audience contains the query | `search_services` |
+| `list_services_by_query.rq` | services whose name/category/audience contains the query | none (`SparqlClient.search_services`, kept for the parity tests; the tool is `search_service_candidates`) |
 | `list_help_services_by_terms.rq` | services whose name/category matches any need term, with provider facility, address and contacts | `find_help` (tool `find_social_help`) |
 | `list_facility_quality_flags.rq` | every facility with filled-field flags, phone, address parts, provider name and source link | `data_quality_report` |
 | `list_duplicate_facilities.rq` | groups of facilities identical in all CSV columns except the IRI | `detect_duplicates` |
@@ -165,7 +165,7 @@ service matches are substrings (`CONTAINS`, no regex). Statistics trim values wi
 | `list_facility_cities_by_city_substring.rq` | `?facility ?city` rows whose city contains the text | tests only (independent reference) |
 | `list_facilities_by_bbox.rq` | facilities with coordinates inside a box, plus contacts, hours, audience, offers and provider | `find_nearby` |
 | `get_postal_code_location_by_postal_code.rq` | average coordinates (and count) of the addresses with a postal code | `find_nearby` (search origin) |
-| `get_facility_details_by_iri.rq` | one facility by IRI: address, contacts, hours, accessibility, offers, provider, source link | `get_awo_details` |
+| `get_facility_details_by_iri.rq` | one facility by IRI: address, contacts, hours, accessibility, offers, provider, source link | none (`SparqlClient.get_awo_details`; the tool is `get_entity_card`) |
 | `list_entity_properties_by_iri.rq` | every property of one entity (any class) with its type; `?value_is_iri` marks links | `get_entity_card` |
 | `list_linked_services_by_iri.rq` | services whose `schema:provider` is the given facility/provider | `get_entity_card` |
 | `list_service_candidates_by_query.rq` | services matching name/category/audience, with the linked facility or provider, its type, name, postal code and locality | `search_service_candidates` |
@@ -175,7 +175,7 @@ service matches are substrings (`CONTAINS`, no regex). Statistics trim values wi
 check allows one `_by_` parameter. So `list_facilities_by_bbox.rq` takes a single
 `{{bbox}}` string (`"south,west,north,east"`, built and validated by `bounding_box()` in
 Python) and splits it with `STRBEFORE`/`STRAFTER` + `xsd:double`. `get_facility_details_by_iri.rq`
-turns `{{iri}}` into an IRI with `IRI("{{iri}}")`; `get_awo_details` only accepts IRIs under
+turns `{{iri}}` into an IRI with `IRI("{{iri}}")`; `SparqlClient.get_awo_details` only accepts IRIs under
 `cdf:` without spaces or IRI-breaking characters. `find_nearby` ranks and filters the box in
 Python: exact distance (haversine), comma-separated terms, and accessibility.
 
@@ -228,10 +228,10 @@ runs these queries on `data/directory.ttl` and checks that the results are ident
 |---|---|---|
 | `count_facilities` / `search_facilities` | facility's address must exist in `adresse`; locality casefold == city | `schema:address` → `?a a schema:PostalAddress`; casefold-equal filter |
 | `get_facility_details` | name (NaN → "") casefold contains query; address/provider attached only if the link resolves | `COALESCE(name, "")` + `CONTAINS`; `OPTIONAL` blocks that require `a schema:PostalAddress` / `a schema:Organization` |
-| `search_services` | name, category or audience contains the query | `OPTIONAL` + `COALESCE` + three `CONTAINS` joined with `||` |
+| `SparqlClient.search_services` (no tool) | name, category or audience contains the query | `OPTIONAL` + `COALESCE` + three `CONTAINS` joined with `||` |
 | `check_completeness` | per column: NaN or whitespace-only = missing | rows − entities with a value matching `\S` (IRIs always count as filled) |
 | `generate_statistics` | `value_counts()` of trimmed, non-empty values; relationship = link resolves | `GROUP BY` trimmed value, `FILTER(?value != "")`; link counted when its target has the right class |
-| `compare_facilities` | `get_facility_details` twice | same |
+| `SparqlClient.compare_facilities` (no tool) | `get_facility_details` twice | same |
 
 **Intentional differences**
 

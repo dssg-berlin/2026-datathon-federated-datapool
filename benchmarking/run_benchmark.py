@@ -7,7 +7,7 @@ Examples (from the repository root):
     python -m benchmarking.run_benchmark --models gpt-4o-mini --suites smoke,professional
     python -m benchmarking.run_benchmark --models openwebui-qwen3-8b --tool-profiles baseline,all --runs 3
     python -m benchmarking.run_benchmark --models fast --judge-model gpt-4o --fault timeout_30s
-    python -m benchmarking.run_benchmark --transport streamable_http --url http://host:7860/mcp
+    python -m benchmarking.run_benchmark --transport streamable_http --url http://localhost:8000/mcp
 
 Reports go to reports/benchmark/ (git-ignored): Markdown, JSON, leaderboard CSV, runs CSV
 and, with several tool profiles, a paired comparison CSV.
@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,10 +32,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmarking.core.agent_loop import run_case  # noqa: E402
+from benchmarking import adapters  # noqa: E402
 from benchmarking.core.cases import EvalCase, load_suites  # noqa: E402
 from benchmarking.core.mcp_client import MCPBenchmarkClient, MCPConnectionConfig  # noqa: E402
 from benchmarking.core.model_adapter import (  # noqa: E402
-    LiteLLMChatModel, ModelEntryConfig, ModelsRegistryConfig, OracleChatModel, RetryPolicyConfig,
+    DEFAULT_SYSTEM_PROMPT, LiteLLMChatModel, ModelEntryConfig, ModelsRegistryConfig, OracleChatModel, RetryPolicyConfig,
 )
 from benchmarking.evaluators import (  # noqa: E402
     AnswerContentEvaluator, CompletionEvaluator, ContactGroundingEvaluator, IriRetrievalEvaluator,
@@ -128,13 +131,51 @@ def build_parser(defaults: dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("--fail-under", type=float, default=None,
                         help="exit with 1 when a (model, profile) pass rate is below this fraction")
     parser.add_argument("--quiet", action="store_true", help="do not print the report")
+    parser.add_argument("--report-from", default="", metavar="FILE",
+                        help="write reports from the runs-partial-*.jsonl of an interrupted run, or again from "
+                             "the benchmark-*.json of a finished one, and exit")
     return parser
 
 
+def finish(args: argparse.Namespace, meta: dict[str, Any], cards: list[RunScorecard]) -> int:
+    """Summaries, reports and the exit code for the finished (or recovered) runs."""
+    profiles = meta["tool_profiles"]
+    summaries = summarize(cards)
+    paired = [change for p in profiles[1:] for change in paired_changes(cards, profiles[0], p)]
+    paths = write_reports(args.output_dir, meta, summaries, cards, paired)
+    if not args.quiet:
+        print_report(markdown_report(meta, summaries, cards, paired))
+    print("reports: " + ", ".join(str(p) for p in paths.values()), file=sys.stderr)
+    if args.fail_under is not None and any(s.pass_rate < args.fail_under for s in summaries):
+        return 1
+    return 0
+
+
+def report_from_partial(args: argparse.Namespace) -> int:
+    """Reports for a run that was interrupted (its runs-partial file: the meta line, then one
+    run per line), or again for a finished run (its benchmark-*.json)."""
+    text = Path(args.report_from).read_text(encoding="utf-8")
+    if args.report_from.endswith(".json"):
+        data = json.loads(text)
+        return finish(args, data["meta"], [RunScorecard.model_validate(run) for run in data["runs"]])
+    lines = [json.loads(line) for line in text.splitlines() if line.strip()]
+    if not lines or "meta" not in lines[0]:
+        print(f"{args.report_from} is not a runs-partial file", file=sys.stderr)
+        return 2
+    cards = [RunScorecard.model_validate(line) for line in lines[1:]]
+    if not cards:
+        print(f"{args.report_from} holds no finished run", file=sys.stderr)
+        return 2
+    meta = {**lines[0]["meta"], "interrupted": f"{len(cards)} of {lines[0]['planned_runs']} runs finished"}
+    return finish(args, meta, cards)
+
+
 async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    if args.report_from:
+        return report_from_partial(args)
     if args.offline:
         args.transport = "inprocess"
-    registry = ModelsRegistryConfig.from_yaml(CONFIG_DIR / "models.yaml")
+    registry = ModelsRegistryConfig.load(CONFIG_DIR)
     retry = RetryPolicyConfig.model_validate(config.get("retry_policy", {}))
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     cases = load_suites(suites, include_aspirational=args.include_aspirational or args.validate_cases)
@@ -173,7 +214,20 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
             return 2
         offered = {p: profile_tools(known_profiles[p], server_tools) for p in profiles}
 
-        models: list[ModelEntryConfig] = registry.resolve(args.models)
+        try:
+            models: list[ModelEntryConfig] = registry.resolve(args.models)
+        except KeyError as exc:
+            print(f"{exc.args[0]}. Your own models go into benchmarking/config/models.local.yaml "
+                  "(see models.local.example.yaml).", file=sys.stderr)
+            return 2
+        fault = FaultMode(args.fault)
+        # Models whose provider has an adapter (benchmarking/adapters/) are run by it, not by LiteLLM.
+        for provider in sorted({m.provider for m in models}):
+            adapter = adapters.for_provider(provider)
+            problem = await adapter.preflight(conn, fault != FaultMode.NONE) if adapter else None
+            if problem:
+                print(problem, file=sys.stderr)
+                return 2
         judge = None
         if args.judge_model:
             from benchmarking.evaluators.rubric_judge import RubricJudgeEvaluator
@@ -184,47 +238,83 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                       SafetyAbstentionEvaluator(), AnswerContentEvaluator(), IriRetrievalEvaluator()]
         max_steps = args.max_steps or int(config.get("agent", {}).get("max_steps", 6))
         semaphore = asyncio.Semaphore(max(1, args.concurrency))
-        fault = FaultMode(args.fault)
+        # MCP clients add the server's instructions to what the model is told; so does the benchmark.
+        system_prompt = DEFAULT_SYSTEM_PROMPT + (f"\n\n{client.instructions}" if client.instructions else "")
+
+        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        server = conn.url if conn.transport == "streamable_http" else (
+            "server.py on data/directory.ttl (offline)" if conn.offline else
+            f"server.py ({conn.transport}) on {args.sparql_endpoint or os.environ.get('SPARQL_ENDPOINT', 'the live SoSuSe endpoint')}")
+        meta = {
+            "started_at": started, "server": server, "suites": suites, "cases": len(cases), "runs_per_case": args.runs,
+            "tool_profiles": profiles, "offered_tools": offered, "models": [m.id for m in models],
+            "judge_model": args.judge_model or None, "fault": None if fault == FaultMode.NONE else fault.value,
+            "oracle_only": all(m.tier == "oracle" for m in models), "max_steps": max_steps,
+        }
+        # Every finished run is appended here. A run that is stopped or crashes writes its
+        # reports itself (below); after a hard kill this file remains for --report-from.
+        out_dir = Path(args.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        partial = out_dir / f"runs-partial-{started.replace(':', '').replace('-', '')[:15]}Z.jsonl"
+        planned = len(models) * len(profiles) * len(cases) * args.runs
+        partial.write_text(json.dumps({"meta": meta, "planned_runs": planned}, ensure_ascii=False) + "\n", encoding="utf-8")
 
         async def one(model_cfg: ModelEntryConfig, profile: str, case: EvalCase, run_index: int) -> RunScorecard:
             async with semaphore:
-                model = OracleChatModel(case, schemas) if model_cfg.tier == "oracle" else LiteLLMChatModel(model_cfg, retry)
-                runner = client if fault == FaultMode.NONE else FaultInjectorMiddleware(
-                    FaultInjectionConfig(mode=fault, fast_forward_sleep_seconds=0.0), downstream_client=client)
-                tools = client.openai_tools(only=offered[profile])
-                run = await run_case(model, runner, case, tools, model_id=model_cfg.id, tool_profile=profile,
-                                     run_index=run_index, max_steps=max_steps)
+                adapter = adapters.for_provider(model_cfg.provider)
+                if adapter is not None:
+                    run = await adapter.run_case(
+                        model_cfg, conn, case, offered[profile], server_tools,
+                        tool_profile=profile, run_index=run_index, max_steps=max_steps,
+                        system_prompt=system_prompt)
+                else:
+                    model = (OracleChatModel(case, schemas) if model_cfg.tier == "oracle"
+                             else LiteLLMChatModel(model_cfg, retry))
+                    runner = client if fault == FaultMode.NONE else FaultInjectorMiddleware(
+                        FaultInjectionConfig(mode=fault, fast_forward_sleep_seconds=0.0), downstream_client=client)
+                    tools = client.openai_tools(only=offered[profile])
+                    run = await run_case(model, runner, case, tools, model_id=model_cfg.id, tool_profile=profile,
+                                         run_index=run_index, max_steps=max_steps, system_prompt=system_prompt)
                 results = {ev.evaluator_name: ev.evaluate(run) for ev in evaluators}
                 verdict = await judge.evaluate(run) if judge else None
                 card = build_scorecard(run, results, verdict)
                 mark = "PASS" if card.passed else f"FAIL ({card.stage})"
                 print(f"[{model_cfg.id} / {profile}] {case.suite}/{case.id} #{run_index}: {mark}", file=sys.stderr)
+                with partial.open("a", encoding="utf-8") as f:
+                    f.write(card.model_dump_json() + "\n")
+                finished.append(card)
                 return card
 
-        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        cards = await asyncio.gather(*[
-            one(m, p, c, r) for m in models for p in profiles for c in cases for r in range(1, args.runs + 1)
-        ])
+        finished: list[RunScorecard] = []
+        tasks = [asyncio.ensure_future(one(m, p, c, r))
+                 for m in models for p in profiles for c in cases for r in range(1, args.runs + 1)]
+        try:  # `kill` (SIGTERM) stops the run like Ctrl+C does, so the report below is still written
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass  # Windows, or not the main thread
+        stopped: BaseException | None = None
+        try:
+            cards = list(await asyncio.gather(*tasks))
+        except (asyncio.CancelledError, KeyboardInterrupt, Exception) as exc:
+            # Stopped (Ctrl+C, kill) or crashed: report the runs that finished instead of losing them.
+            stopped, cards = exc, list(finished)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-    summaries = summarize(list(cards))
-    paired = [change for p in profiles[1:] for change in paired_changes(list(cards), profiles[0], p)]
-    server = conn.url if conn.transport == "streamable_http" else (
-        "server.py on data/directory.ttl (offline)" if conn.offline else
-        f"server.py ({conn.transport}) on {args.sparql_endpoint or os.environ.get('SPARQL_ENDPOINT', 'the live SoSuSe endpoint')}")
-    meta = {
-        "started_at": started, "server": server, "suites": suites, "cases": len(cases), "runs_per_case": args.runs,
-        "tool_profiles": profiles, "offered_tools": offered, "models": [m.id for m in models],
-        "judge_model": args.judge_model or None, "fault": None if fault == FaultMode.NONE else fault.value,
-        "oracle_only": all(m.tier == "oracle" for m in models), "max_steps": max_steps,
-    }
-    paths = write_reports(args.output_dir, meta, summaries, list(cards), paired)
-    if not args.quiet:
-        print_report(markdown_report(meta, summaries, list(cards), paired))
-    print("reports: " + ", ".join(str(p) for p in paths.values()), file=sys.stderr)
+    if stopped is None:
+        code = finish(args, meta, cards)
+        partial.unlink(missing_ok=True)
+        return code
 
-    if args.fail_under is not None and any(s.pass_rate < args.fail_under for s in summaries):
-        return 1
-    return 0
+    reason = "stopped" if isinstance(stopped, (asyncio.CancelledError, KeyboardInterrupt)) else f"{type(stopped).__name__}: {stopped}"
+    print(f"benchmark {reason}: {len(cards)} of {planned} runs finished", file=sys.stderr)
+    if cards:
+        finish(args, {**meta, "interrupted": f"{len(cards)} of {planned} runs finished"}, cards)
+    partial.unlink(missing_ok=True)
+    if not isinstance(stopped, (asyncio.CancelledError, KeyboardInterrupt)):
+        raise stopped
+    return 130
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -236,7 +326,10 @@ def main(argv: list[str] | None = None) -> int:
     load_env_file()
     config = load_config(CONFIG_DIR / "eval_config.yaml")
     args = build_parser(config.get("defaults", {})).parse_args(argv)
-    return asyncio.run(benchmark(args, config))
+    try:
+        return asyncio.run(benchmark(args, config))
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":

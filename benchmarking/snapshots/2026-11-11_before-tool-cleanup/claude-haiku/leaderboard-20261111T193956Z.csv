@@ -1,0 +1,2 @@
+model,tool_profile,runs,passed,pass_rate,ci_lower,ci_upper,composite_mean,right_tool_rate,tool_selection_pass_rate,contact_hallucination_rate,judge_complete_rate,latency_p50_ms,latency_p95_ms,total_tokens,total_cost_usd
+claude-code-haiku,all,92,76,0.8261,0.736016,0.890018,0.9411,0.8556,0.8556,0.011,,20800.0,71801.05,3486319,0.236461
