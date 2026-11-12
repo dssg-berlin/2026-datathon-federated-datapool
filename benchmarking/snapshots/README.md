@@ -17,7 +17,12 @@ data from the SoSuSe endpoint:
 | [`2026-11-11_after-tool-cleanup/`](2026-11-11_after-tool-cleanup/) | commit `c6aee78` (cleaned-up tool list, server instructions) | 19 |
 
 Three models: `qwen2.5:7b` on a local Ollama (16k context), and Claude Haiku 5.5 and Claude
-Opus 5.5 through headless Claude Code.
+Opus 5.5 through headless Claude Code. These are the setups in [recipes](../recipes/); the
+model entries are those of `config/models.local.example.yaml`.
+
+[`2026-11-11_comparison.md`](2026-11-11_comparison.md) is the full comparison, generated
+with `python -m benchmarking.compare`: every rate per model and suite, each case that was
+gained or lost, and the tools called by mistake. The tables below are taken from it.
 
 ### Result
 
@@ -65,8 +70,8 @@ and 1 lost.
    anything else.
 5. **No crisis numbers and invented contacts.** The server now sends MCP instructions
    (search in German, never invent contact details, emergency numbers first). Invented
-   contact details went from 1 and 3 cases to 0 for Haiku and Opus; qwen still invents
-   them in 3 cases.
+   contact details went from 1 and 3 answers to 0 for Haiku and Opus; qwen still invents
+   them (4 answers before, 5 after).
 
 Tools the models called first by mistake (runs):
 
@@ -88,7 +93,7 @@ Tools the models called first by mistake (runs):
   lists of accepted tools in about 25 citizen and professional cases. The prompts are
   unchanged.
 - **Claude ran through Claude Code**, not through the API: Claude Code runs the tool loop
-  with its own defaults. See [Claude through Claude Code](../README.md#6-claude-through-claude-code-subscription-login-no-api-key).
+  with its own defaults. See the [Claude Code recipe](../recipes/claude-code.md).
 - **qwen and long tool results.** Results of several thousand tokens (a whole city, the
   statistics) may not fit next to the tool list in 16k tokens, and Ollama then cuts the
   conversation.
@@ -97,20 +102,16 @@ Tools the models called first by mistake (runs):
 
 ### Reproduce
 
-```bash
-docker compose up -d --build                      # the current server on :8000
-ollama serve & ollama pull qwen2.5:7b
-python -m benchmarking.run_benchmark --models qwen-2-5-7b-ollama \
-    --suites smoke,citizen,professional --transport streamable_http --concurrency 1 \
-    --output-dir benchmarking/snapshots/<date>_<label>/qwen2.5-7b
+Follow the [Ollama](../recipes/ollama.md) and [Claude Code](../recipes/claude-code.md)
+recipes with `--output-dir benchmarking/snapshots/<date>_<label>/<model>`, then compare
+two snapshot folders:
 
-claude auth login                                 # once
-python -m benchmarking.run_benchmark --models claude-code-haiku \
-    --suites smoke,citizen,professional --transport streamable_http --concurrency 3 \
-    --output-dir benchmarking/snapshots/<date>_<label>/claude-haiku
+```bash
+python -m benchmarking.compare benchmarking/snapshots/<before> benchmarking/snapshots/<after> \
+    --output benchmarking/snapshots/<date>_comparison.md
 ```
 
 The "before" runs used an image built from `fac363e` (`docker build -t awo-mcp:before .`,
 `docker run -d -p 8001:8000 awo-mcp:before`, `--url http://localhost:8001/mcp`) and the
-harness and cases of commit `76dfe2c`, which still expect the old tools. On an Apple M1 with 16 GB the qwen run takes 1.5 to 2
-hours, a Claude run 10 to 20 minutes.
+cases of that commit, which still expect the old tools. On an Apple M1 with 16 GB the qwen
+run takes 1.5 to 2 hours, a Claude run 10 to 20 minutes.

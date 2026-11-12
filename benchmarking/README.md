@@ -154,7 +154,8 @@ writes the reports for the cases that finished. The same option accepts a finish
 
 By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,
 write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.
-[snapshots/README.md](snapshots/README.md) lists the committed snapshots and compares them.
+[snapshots/README.md](snapshots/README.md) lists the committed snapshots; they are examples of
+one contributor's setup, not a required way to test.
 
 **Comparing two results.** `python -m benchmarking.compare <before> <after>` writes a
 Markdown comparison of two results, for example before and after a change to the server:
