@@ -1,4 +1,4 @@
-"""Run a case through Claude Code in headless mode (`claude -p`) instead of a model API.
+"""Adapter: run a case through Claude Code in headless mode (`claude -p`) instead of a model API.
 
 For Claude models without an API key: Claude Code signs in with a Claude subscription
 (`claude auth login`), so the benchmark can measure Haiku or Opus on a Pro/Max/Team plan.
@@ -9,6 +9,8 @@ same `CaseRun` the LiteLLM agent loop produces, so the evaluators and reports ar
 
 Differences from the API loop, to keep in mind when comparing numbers:
 - Claude Code talks to the MCP server directly, so `--fault` and `--offline` do not apply.
+- Model entries (provider "claude-code") go into config/models.local.yaml; see
+  recipes/claude-code.md.
 - Tool results are not cut to MAX_TOOL_RESULT_CHARS; Claude Code applies its own limits.
 - Thinking and effort are Claude Code's defaults (set `extra_params: {effort: ...}` in
   models.yaml to change the effort).
@@ -54,8 +56,10 @@ def find_cli() -> str | None:
     return str(bundled[-1]) if bundled else None
 
 
-async def preflight() -> str | None:
+async def preflight(conn: MCPConnectionConfig, fault_active: bool) -> str | None:
     """None when Claude Code can run, otherwise what the user has to do."""
+    if conn.transport == "inprocess" or fault_active:
+        return "--offline and --fault do not work with Claude Code models: Claude Code connects to the server itself"
     cli = find_cli()
     if cli is None:
         return ("Claude Code CLI not found. Install it (https://code.claude.com/docs/en/setup) "
@@ -181,7 +185,7 @@ def apply_events(run: CaseRun, events: list[dict[str, Any]], max_steps: int) -> 
             run.loop_error = "model gave no final answer (empty reply)"
 
 
-async def run_case_claude_code(
+async def run_case(
     cfg: ModelEntryConfig,
     conn: MCPConnectionConfig,
     case: EvalCase,
@@ -214,6 +218,9 @@ async def run_case_claude_code(
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=cfg.timeout_seconds)
+        except asyncio.CancelledError:  # the benchmark was interrupted: do not leave the session running
+            process.kill()
+            raise
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()

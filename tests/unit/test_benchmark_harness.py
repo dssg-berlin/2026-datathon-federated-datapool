@@ -309,10 +309,10 @@ def test_litellm_adapter_reports_missing_api_key(monkeypatch):
     assert not result.success and "MISSING_KEY" in result.error_message
 
 
-# ---- Claude Code runner (core/claude_code.py) and report additions --------------------
+# ---- runner adapters (adapters/), local model file and report additions --------------
 
 def test_claude_code_events_become_a_case_run():
-    from benchmarking.core import claude_code
+    from benchmarking.adapters import claude_code
     from benchmarking.core.agent_loop import CaseRun
 
     events = [
@@ -337,7 +337,7 @@ def test_claude_code_events_become_a_case_run():
 
 
 def test_claude_code_errors_and_step_limit_are_loop_errors():
-    from benchmarking.core import claude_code
+    from benchmarking.adapters import claude_code
     from benchmarking.core.agent_loop import CaseRun
 
     def run_with(final):
@@ -351,7 +351,7 @@ def test_claude_code_errors_and_step_limit_are_loop_errors():
 
 
 def test_claude_code_command_offers_only_the_profile_tools():
-    from benchmarking.core import claude_code
+    from benchmarking.adapters import claude_code
     from benchmarking.core.mcp_client import MCPConnectionConfig
 
     cfg = ModelEntryConfig(id="claude-code-haiku", name="h", litellm_model="claude-haiku-5-5",
@@ -373,9 +373,12 @@ def test_models_yaml_loads_and_passes_extra_params(monkeypatch):
     from benchmarking.run_benchmark import CONFIG_DIR
 
     registry = ModelsRegistryConfig.from_yaml(CONFIG_DIR / "models.yaml")
-    assert {m.id for m in registry.resolve("claude_code")} == {"claude-code-haiku", "claude-code-opus"}
+    assert not [m.id for m in registry.list_all_models() if m.provider == "claude-code"], (
+        "setup-specific entries belong in models.local.yaml, not in the shared models.yaml")
+    for model in registry.list_all_models():
+        if model.provider == "ollama":  # the tool list alone needs ~5,000 tokens
+            assert model.extra_params.get("num_ctx", 0) >= 16384, f"{model.id} would cut the tool list"
     ollama = registry.get_model("qwen-2-5-7b-ollama")
-    assert ollama.extra_params["num_ctx"] >= 16384  # the tool list alone needs ~5,000 tokens
 
     seen = {}
 
@@ -408,3 +411,33 @@ def test_right_tool_rate_and_tool_confusions():
     assert tool_confusions(cards) == [("find_social_help", "count_facilities", 2, ["b", "c"]),
                                       ("count_facilities", "(no tool call)", 1, ["d"])]
     assert wrong_first_tools(cards) == [("count_facilities", 2), ("(no tool call)", 1)]
+
+
+def test_local_models_file_overrides_and_adds(tmp_path):
+    from benchmarking.core.model_adapter import ModelsRegistryConfig
+    from benchmarking.run_benchmark import CONFIG_DIR
+
+    (tmp_path / "models.yaml").write_text((CONFIG_DIR / "models.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    shared = ModelsRegistryConfig.load(tmp_path)
+    assert shared.get_model("qwen-2-5-7b-ollama").timeout_seconds == 60.0
+
+    # The example file is what a user copies; it must load and merge.
+    (tmp_path / "models.local.yaml").write_text(
+        (CONFIG_DIR / "models.local.example.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    merged = ModelsRegistryConfig.load(tmp_path)
+    mine = merged.get_model("qwen-2-5-7b-ollama")
+    assert mine.litellm_model == "ollama_chat/qwen2.5:7b" and mine.timeout_seconds == 900.0
+    assert [m.id for m in merged.list_all_models()].count("qwen-2-5-7b-ollama") == 1, "an overridden id exists once"
+    assert {m.id for m in merged.resolve("claude_code")} == {"claude-code-haiku", "claude-code-opus"}
+    assert len(merged.list_all_models()) == len(shared.list_all_models()) + 2
+
+
+def test_adapters_are_found_by_provider():
+    from benchmarking import adapters
+
+    claude = adapters.for_provider("claude-code")
+    assert claude is not None and callable(claude.run_case) and callable(claude.preflight)
+    assert adapters.for_provider("openai") is None, "providers without an adapter use the LiteLLM loop"
+    from benchmarking.core.mcp_client import MCPConnectionConfig
+    refused = asyncio.run(claude.preflight(MCPConnectionConfig(transport="inprocess"), False))
+    assert "--offline" in refused

@@ -31,7 +31,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmarking.core.agent_loop import run_case  # noqa: E402
-from benchmarking.core import claude_code  # noqa: E402
+from benchmarking import adapters  # noqa: E402
 from benchmarking.core.cases import EvalCase, load_suites  # noqa: E402
 from benchmarking.core.mcp_client import MCPBenchmarkClient, MCPConnectionConfig  # noqa: E402
 from benchmarking.core.model_adapter import (  # noqa: E402
@@ -174,7 +174,7 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
         return report_from_partial(args)
     if args.offline:
         args.transport = "inprocess"
-    registry = ModelsRegistryConfig.from_yaml(CONFIG_DIR / "models.yaml")
+    registry = ModelsRegistryConfig.load(CONFIG_DIR)
     retry = RetryPolicyConfig.model_validate(config.get("retry_policy", {}))
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     cases = load_suites(suites, include_aspirational=args.include_aspirational or args.validate_cases)
@@ -215,10 +215,10 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
         models: list[ModelEntryConfig] = registry.resolve(args.models)
         fault = FaultMode(args.fault)
-        if any(m.provider == claude_code.PROVIDER for m in models):
-            # Claude Code connects to the MCP server itself (see core/claude_code.py).
-            problem = ("--offline and --fault do not work with Claude Code models"
-                       if conn.transport == "inprocess" or fault != FaultMode.NONE else await claude_code.preflight())
+        # Models whose provider has an adapter (benchmarking/adapters/) are run by it, not by LiteLLM.
+        for provider in sorted({m.provider for m in models}):
+            adapter = adapters.for_provider(provider)
+            problem = await adapter.preflight(conn, fault != FaultMode.NONE) if adapter else None
             if problem:
                 print(problem, file=sys.stderr)
                 return 2
@@ -255,8 +255,9 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
 
         async def one(model_cfg: ModelEntryConfig, profile: str, case: EvalCase, run_index: int) -> RunScorecard:
             async with semaphore:
-                if model_cfg.provider == claude_code.PROVIDER:
-                    run = await claude_code.run_case_claude_code(
+                adapter = adapters.for_provider(model_cfg.provider)
+                if adapter is not None:
+                    run = await adapter.run_case(
                         model_cfg, conn, case, offered[profile], server_tools,
                         tool_profile=profile, run_index=run_index, max_steps=max_steps,
                         system_prompt=system_prompt)

@@ -1,0 +1,42 @@
+# Your own models, without touching the shared models.yaml.
+#
+#   cp benchmarking/config/models.local.example.yaml benchmarking/config/models.local.yaml
+#
+# models.local.yaml is git-ignored and merged on top of models.yaml when the benchmark starts:
+# - an entry whose id exists in models.yaml replaces that entry,
+# - any other entry is added, and a new tier name can be selected with --models <tier>.
+# Keep only what you use. The entries below are the setups described in ../recipes/.
+tiers:
+  local:
+    models:
+      # The Ollama model tag that is installed here, with a timeout for a laptop
+      # (replaces the shared "qwen-2-5-7b-ollama"). See ../recipes/ollama.md.
+      - id: "qwen-2-5-7b-ollama"
+        name: "Qwen 2.5 7B (Ollama, this machine)"
+        litellm_model: "ollama_chat/qwen2.5:7b"
+        provider: "ollama"
+        tier: "local"
+        api_base: "http://localhost:11434"
+        timeout_seconds: 900.0
+        extra_params:
+          num_ctx: 16384
+
+  # Claude through the Claude Code CLI (adapter benchmarking/adapters/claude_code.py): uses the
+  # subscription the CLI is signed in with, no API key. See ../recipes/claude-code.md.
+  # litellm_model is the name passed to `claude --model`.
+  claude_code:
+    description: "Claude models through the Claude Code CLI"
+    models:
+      - id: "claude-code-haiku"
+        name: "Claude Haiku 5.5 (Claude Code)"
+        litellm_model: "claude-haiku-5-5"
+        provider: "claude-code"
+        tier: "fast"
+        timeout_seconds: 600.0
+
+      - id: "claude-code-opus"
+        name: "Claude Opus 5.5 (Claude Code)"
+        litellm_model: "claude-opus-5-5"
+        provider: "claude-code"
+        tier: "frontier"
+        timeout_seconds: 600.0

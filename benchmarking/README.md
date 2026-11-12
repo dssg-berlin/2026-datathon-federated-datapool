@@ -46,7 +46,7 @@ Every benchmark run follows a four-stage pipeline:
 
 ## Benchmarking approaches
 
-Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in seven ways:
+Depending on whether you are validating code changes, comparing tool sets, or evaluating models across cost tiers, you can run the harness in six ways:
 
 ### 1. Zero-Cost Pipeline Verification (`--models oracle`)
 Verify tool schemas, SPARQL queries, and evaluator logic without an API key:
@@ -97,54 +97,30 @@ python -m benchmarking.run_benchmark --models litellm:openrouter/qwen/qwen-2.5-7
 
 > **Tip for Free-Tier API Keys:** Free-tier keys (such as Google AI Studio free tier) enforce strict per-minute (`5 RPM`) and daily (`20 RPD`) quotas and return HTTP `429` when burst requests arrive in parallel. Pass `--concurrency 1` and select a smaller subset of cases with `--cases` when testing with a free-tier key.
 
-### 5. Local model with Ollama (no API key)
+### 5. Your own models and runners
 
-`qwen-2-5-7b-ollama` in `config/models.yaml` runs `qwen2.5:7b` on a local
-[Ollama](https://ollama.com). This is how the committed [snapshots](snapshots/) were made:
+The shared `config/models.yaml` holds models every contributor can select. For your own
+setup, do not edit it:
 
-```bash
-ollama serve                       # skip if the Ollama app is already running
-ollama pull qwen2.5:7b             # once, 4.7 GB
-docker compose up -d --build       # the server under test on http://localhost:8000/mcp
+- **Your models** go into `config/models.local.yaml` (git-ignored, merged on top of
+  `models.yaml` when the benchmark starts). Copy `config/models.local.example.yaml` and
+  keep what you use: another model tag, a longer timeout, provider-specific request
+  parameters (`extra_params`), a model of your own. An entry with an existing id replaces
+  the shared one.
+- **Models without an API** (a CLI, a desktop app, an agent framework) are run by an
+  adapter: a module in `adapters/` that runs one case and returns what happened. The
+  harness finds it by the `provider` of the model entry; see `adapters/__init__.py`.
+- [`recipes/`](recipes/) describes concrete setups: a local model with
+  [Ollama](recipes/ollama.md), and Claude without an API key through
+  [Claude Code](recipes/claude-code.md).
 
-python -m benchmarking.run_benchmark --models qwen-2-5-7b-ollama \
-    --suites smoke,citizen,professional \
-    --transport streamable_http --concurrency 1 \
-    --output-dir benchmarking/snapshots/<date>_<label>
-```
+> **Local runners and context size.** The server's tool definitions need about 5,000
+> tokens. A runner whose context window is smaller cuts the prompt without an error
+> (Ollama's default is 4,096 tokens), the model then sees only part of the tool list and
+> picks wrong tools or none. Give a local model at least 16k tokens; the Ollama entries in
+> `models.yaml` set `num_ctx` for this reason.
 
-- **Context size.** Ollama cuts a prompt that is longer than its context window without an
-  error, and its default window (4,096 tokens) is smaller than what a request needs: the
-  model then sees only part of the tool list and picks wrong tools or none. The model entry
-  sets `extra_params: {num_ctx: 16384}`. Give any other local runner (Open WebUI, LM Studio)
-  a context of at least 16k tokens as well, or its numbers measure the cut, not the tools.
-- **`--concurrency 1`.** Ollama answers one request at a time and reuses the evaluated tool
-  list between consecutive requests; parallel cases only wait and break that reuse.
-- **Duration.** About 35 s per case on an Apple M1 with 16 GB (cases with large tool results
-  take minutes), so the three default suites take about an hour and `multilingual` another.
-- Leave out `--transport streamable_http` to start `server.py` directly instead of using
-  the container.
-
-### 6. Claude through Claude Code (subscription login, no API key)
-
-`claude-code-haiku` and `claude-code-opus` run each case as a headless Claude Code session
-(`claude -p`) that gets only this server's tools and the benchmark's system prompt. Claude
-Code signs in with a Claude subscription, so no `ANTHROPIC_API_KEY` is needed:
-
-```bash
-claude auth login                  # once; opens the browser
-python -m benchmarking.run_benchmark --models claude-code-haiku,claude-code-opus \
-    --suites smoke,citizen,professional --transport streamable_http --concurrency 2
-```
-
-The harness looks for the CLI in `CLAUDE_CODE_BIN`, then `claude` on the `PATH`, then
-inside the Claude desktop app (macOS). Claude Code runs the tool loop and talks to the MCP
-server itself, so `--offline` and `--fault` do not apply, tool results are not cut by the
-harness, and thinking/effort are Claude Code's defaults (`core/claude_code.py`). The runs
-count against the plan's usage limits; the report's cost column is what the API would
-have charged.
-
-### 7. Fault Injection & Chaos Testing (`--fault`)
+### 6. Fault Injection & Chaos Testing (`--fault`)
 Test whether models recover gracefully or hallucinate when the MCP server experiences failures:
 
 ```bash
@@ -287,9 +263,11 @@ give pass rates with **Wilson 95 % intervals**; with tens of cases they are wide
 ```text
 benchmarking/
 ├── run_benchmark.py          CLI
-├── config/                   eval_config.yaml (server, profiles, defaults), models.yaml
+├── config/                   eval_config.yaml (server, profiles, defaults), models.yaml, models.local.yaml (yours)
 ├── cases/                    suites (JSON) and the multilingual generator
-├── core/                     cases.py (format), mcp_client.py, model_adapter.py, agent_loop.py, claude_code.py
+├── core/                     cases.py (format), mcp_client.py, model_adapter.py, agent_loop.py
+├── adapters/                 optional runners for models without an API (found by `provider`)
+├── recipes/                  how-tos for concrete setups (Ollama, Claude Code)
 ├── evaluators/               deterministic evaluators and the optional rubric judge
 ├── metrics/                  scorecards, summaries, Wilson intervals, paired changes
 ├── reporters/                Markdown / CSV / JSON

@@ -37,6 +37,9 @@ DEFAULT_SYSTEM_PROMPT = (
 
 Tier = Literal["frontier", "fast", "local", "oracle"]
 
+# The user's own model entries, next to models.yaml. Not committed: see models.local.example.yaml.
+LOCAL_MODELS_FILE = "models.local.yaml"
+
 
 class ModelEntryConfig(BaseModel):
     """One model in models.yaml."""
@@ -65,7 +68,7 @@ class ModelEntryConfig(BaseModel):
 class ModelTierGroup(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    description: str
+    description: str = ""
     models: list[ModelEntryConfig] = Field(default_factory=list)
 
 
@@ -82,12 +85,30 @@ class ModelsRegistryConfig(BaseModel):
 
     version: str = "1.0"
     default_tier: Literal["frontier", "fast", "local"] = "fast"
-    tiers: dict[Literal["frontier", "fast", "local", "claude_code"], ModelTierGroup]
+    tiers: dict[str, ModelTierGroup]
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ModelsRegistryConfig:
         with Path(path).open("r", encoding="utf-8") as f:
             return cls.model_validate(yaml.safe_load(f))
+
+    @classmethod
+    def load(cls, config_dir: str | Path) -> ModelsRegistryConfig:
+        """models.yaml plus, when it exists, the user's own models.local.yaml (git-ignored)."""
+        registry = cls.from_yaml(Path(config_dir) / "models.yaml")
+        local = Path(config_dir) / LOCAL_MODELS_FILE
+        if local.exists():
+            registry.merge(cls.from_yaml(local))
+        return registry
+
+    def merge(self, other: ModelsRegistryConfig) -> None:
+        """Add other's models: an id that already exists is replaced, a new tier is added."""
+        for tier, group in other.tiers.items():
+            replaced = {m.id for m in group.models}
+            for existing in self.tiers.values():
+                existing.models = [m for m in existing.models if m.id not in replaced]
+            target = self.tiers.setdefault(tier, ModelTierGroup(description=group.description))
+            target.models += group.models
 
     def list_all_models(self, tier: str | None = None) -> list[ModelEntryConfig]:
         if tier is not None:
