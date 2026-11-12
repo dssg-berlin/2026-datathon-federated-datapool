@@ -66,3 +66,9 @@ def test_interrupted_run_keeps_its_finished_runs(tmp_path):
     assert "Interrupted run: 1 of 2 runs finished" in markdown.read_text(encoding="utf-8")
     [recovered_json] = recovered.glob("benchmark-*.json")
     assert len(json.loads(recovered_json.read_text(encoding="utf-8"))["runs"]) == 1
+
+    # A finished run's JSON can be turned into reports again (e.g. after the report format changed).
+    again = tmp_path / "again"
+    assert main(["--report-from", str(report), "--quiet", "--output-dir", str(again)]) == 0
+    [again_json] = again.glob("benchmark-*.json")
+    assert json.loads(again_json.read_text(encoding="utf-8"))["runs"] == data["runs"]

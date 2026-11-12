@@ -171,7 +171,8 @@ Every run writes five files, named with the UTC time of the run:
 While a run is in progress, every finished case is appended to `runs-partial-<time>.jsonl`
 in the output directory (removed at the end). If a run is interrupted (laptop asleep, usage
 limit, Ctrl+C), `python -m benchmarking.run_benchmark --report-from <that file>` writes the
-reports for the cases that finished.
+reports for the cases that finished. The same option accepts a finished run's
+`benchmark-<time>.json` and writes its reports again.
 
 By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,
 write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.

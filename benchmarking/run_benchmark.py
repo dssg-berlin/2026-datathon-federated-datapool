@@ -35,7 +35,7 @@ from benchmarking.core import claude_code  # noqa: E402
 from benchmarking.core.cases import EvalCase, load_suites  # noqa: E402
 from benchmarking.core.mcp_client import MCPBenchmarkClient, MCPConnectionConfig  # noqa: E402
 from benchmarking.core.model_adapter import (  # noqa: E402
-    LiteLLMChatModel, ModelEntryConfig, ModelsRegistryConfig, OracleChatModel, RetryPolicyConfig,
+    DEFAULT_SYSTEM_PROMPT, LiteLLMChatModel, ModelEntryConfig, ModelsRegistryConfig, OracleChatModel, RetryPolicyConfig,
 )
 from benchmarking.evaluators import (  # noqa: E402
     AnswerContentEvaluator, CompletionEvaluator, ContactGroundingEvaluator, IriRetrievalEvaluator,
@@ -130,8 +130,9 @@ def build_parser(defaults: dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("--fail-under", type=float, default=None,
                         help="exit with 1 when a (model, profile) pass rate is below this fraction")
     parser.add_argument("--quiet", action="store_true", help="do not print the report")
-    parser.add_argument("--report-from", default="", metavar="RUNS_PARTIAL_JSONL",
-                        help="write the reports of an interrupted run from its runs-partial-*.jsonl and exit")
+    parser.add_argument("--report-from", default="", metavar="FILE",
+                        help="write reports from the runs-partial-*.jsonl of an interrupted run, or again from "
+                             "the benchmark-*.json of a finished one, and exit")
     return parser
 
 
@@ -150,8 +151,13 @@ def finish(args: argparse.Namespace, meta: dict[str, Any], cards: list[RunScorec
 
 
 def report_from_partial(args: argparse.Namespace) -> int:
-    """Reports for a run that was interrupted: its first line is the meta, then one run per line."""
-    lines = [json.loads(line) for line in Path(args.report_from).read_text(encoding="utf-8").splitlines() if line.strip()]
+    """Reports for a run that was interrupted (its runs-partial file: the meta line, then one
+    run per line), or again for a finished run (its benchmark-*.json)."""
+    text = Path(args.report_from).read_text(encoding="utf-8")
+    if args.report_from.endswith(".json"):
+        data = json.loads(text)
+        return finish(args, data["meta"], [RunScorecard.model_validate(run) for run in data["runs"]])
+    lines = [json.loads(line) for line in text.splitlines() if line.strip()]
     if not lines or "meta" not in lines[0]:
         print(f"{args.report_from} is not a runs-partial file", file=sys.stderr)
         return 2
@@ -226,6 +232,8 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                       SafetyAbstentionEvaluator(), AnswerContentEvaluator(), IriRetrievalEvaluator()]
         max_steps = args.max_steps or int(config.get("agent", {}).get("max_steps", 6))
         semaphore = asyncio.Semaphore(max(1, args.concurrency))
+        # MCP clients add the server's instructions to what the model is told; so does the benchmark.
+        system_prompt = DEFAULT_SYSTEM_PROMPT + (f"\n\n{client.instructions}" if client.instructions else "")
 
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
         server = conn.url if conn.transport == "streamable_http" else (
@@ -250,7 +258,8 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                 if model_cfg.provider == claude_code.PROVIDER:
                     run = await claude_code.run_case_claude_code(
                         model_cfg, conn, case, offered[profile], server_tools,
-                        tool_profile=profile, run_index=run_index, max_steps=max_steps)
+                        tool_profile=profile, run_index=run_index, max_steps=max_steps,
+                        system_prompt=system_prompt)
                 else:
                     model = (OracleChatModel(case, schemas) if model_cfg.tier == "oracle"
                              else LiteLLMChatModel(model_cfg, retry))
@@ -258,7 +267,7 @@ async def benchmark(args: argparse.Namespace, config: dict[str, Any]) -> int:
                         FaultInjectionConfig(mode=fault, fast_forward_sleep_seconds=0.0), downstream_client=client)
                     tools = client.openai_tools(only=offered[profile])
                     run = await run_case(model, runner, case, tools, model_id=model_cfg.id, tool_profile=profile,
-                                         run_index=run_index, max_steps=max_steps)
+                                         run_index=run_index, max_steps=max_steps, system_prompt=system_prompt)
                 results = {ev.evaluator_name: ev.evaluate(run) for ev in evaluators}
                 verdict = await judge.evaluate(run) if judge else None
                 card = build_scorecard(run, results, verdict)

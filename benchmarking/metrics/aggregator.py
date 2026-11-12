@@ -158,9 +158,18 @@ def tool_confusions(cards: list[RunScorecard]) -> list[tuple[str, str, int, list
     pairs: dict[tuple[str, str], list[str]] = defaultdict(list)
     for card in cards:
         if right_tool(card) is False:
-            pairs[(" | ".join(card.expected_tools), first_tool(card))].append(card.case_id)
+            pairs[(", ".join(card.expected_tools), first_tool(card))].append(card.case_id)
     rows = [(expected, called, len(ids), sorted(set(ids))) for (expected, called), ids in pairs.items()]
     return sorted(rows, key=lambda row: (-row[2], row[0], row[1]))
+
+
+def wrong_first_tools(cards: list[RunScorecard]) -> list[tuple[str, int]]:
+    """(tool called first although it was not expected, runs), most frequent first."""
+    counts: dict[str, int] = defaultdict(int)
+    for card in cards:
+        if right_tool(card) is False:
+            counts[first_tool(card)] += 1
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
 
 
 def summarize(cards: list[RunScorecard]) -> list[GroupSummary]:

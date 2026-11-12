@@ -391,7 +391,7 @@ def test_models_yaml_loads_and_passes_extra_params(monkeypatch):
 
 
 def test_right_tool_rate_and_tool_confusions():
-    from benchmarking.metrics.aggregator import RunScorecard, right_tool_rate, tool_confusions
+    from benchmarking.metrics.aggregator import RunScorecard, right_tool_rate, tool_confusions, wrong_first_tools
 
     def card(case_id, expected, called):
         return RunScorecard(
@@ -407,3 +407,4 @@ def test_right_tool_rate_and_tool_confusions():
     assert right_tool_rate(cards) == 0.25  # case e expects no tool and is not graded
     assert tool_confusions(cards) == [("find_social_help", "count_facilities", 2, ["b", "c"]),
                                       ("count_facilities", "(no tool call)", 1, ["d"])]
+    assert wrong_first_tools(cards) == [("count_facilities", 2), ("(no tool call)", 1)]

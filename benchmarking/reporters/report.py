@@ -10,6 +10,7 @@ from typing import Any
 
 from benchmarking.metrics.aggregator import (
     GroupSummary, PairedChange, RunScorecard, first_tool, right_tool, right_tool_rate, tool_confusions,
+    wrong_first_tools,
 )
 
 
@@ -69,6 +70,12 @@ def markdown_report(meta: dict[str, Any], summaries: list[GroupSummary], cards: 
         group = [c for c in cards if (c.model_id, c.tool_profile) == (s.model_id, s.tool_profile)]
         for expected, called, count, case_ids in tool_confusions(group):
             lines.append(f"| {s.model_id} | {s.tool_profile} | {expected} | {called} | {count} | {', '.join(case_ids)} |")
+    for s in summaries:
+        group = [c for c in cards if (c.model_id, c.tool_profile) == (s.model_id, s.tool_profile)]
+        wrong = wrong_first_tools(group)
+        if wrong:
+            lines += ["", f"{s.model_id} / {s.tool_profile}, tools called first by mistake: "
+                      + ", ".join(f"`{name}` ({count})" for name, count in wrong)]
 
     lines += ["", "## Where runs failed", "", "| model | tool profile | stage | runs |", "|---|---|---|---|"]
     for s in summaries:
