@@ -154,6 +154,9 @@ writes the reports for the cases that finished. The same option accepts a finish
 
 By default they go to `reports/benchmark/` (git-ignored). To keep a run as a reference,
 write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.
+Git ignores the `benchmark-*.json` files there: they hold every answer and tool call and
+run to thousands of lines. Keep them locally for `benchmarking.compare` and commit its
+Markdown output instead.
 [snapshots/README.md](snapshots/README.md) lists the committed snapshots; they are examples of
 one contributor's setup, not a required way to test.
 

@@ -31,3 +31,7 @@ reports/
 
 # Personal benchmark models (see benchmarking/config/models.local.example.yaml)
 benchmarking/config/models.local.yaml
+
+# Raw benchmark results (every answer and tool call, thousands of lines per run):
+# snapshots keep the Markdown reports and CSVs only
+benchmarking/snapshots/**/benchmark-*.json

@@ -1,8 +1,10 @@
 # Benchmark snapshots
 
-Committed benchmark runs, kept as a reference. Each folder holds the full output of one run
-(`benchmark-*.md` report, `benchmark-*.json` with every run and answer, leaderboard and
-per-run CSV; see [Reports and snapshots](../README.md#reports-and-snapshots)).
+Committed benchmark runs, kept as a reference. Each folder holds the `benchmark-*.md`
+report, the leaderboard and the per-run CSV of one run (see
+[Reports and snapshots](../README.md#reports-and-snapshots)). The raw `benchmark-*.json`
+of a run (every answer and tool call, about 4,000 lines) is not committed; git ignores it
+in this folder.
 
 ## 2026-11-11: before and after the tool cleanup
 
@@ -21,8 +23,9 @@ Opus 5.5 through headless Claude Code. These are the setups in [recipes](../reci
 model entries are those of `config/models.local.example.yaml`.
 
 [`2026-11-11_comparison.md`](2026-11-11_comparison.md) is the full comparison, generated
-with `python -m benchmarking.compare`: every rate per model and suite, each case that was
-gained or lost, and the tools called by mistake. The tables below are taken from it.
+with `python -m benchmarking.compare` from the runs' JSON files: every rate per model and
+suite, each case that was gained or lost, and the tools called by mistake. The tables
+below are taken from it.
 
 ### Result
 
@@ -104,7 +107,9 @@ Tools the models called first by mistake (runs):
 
 Follow the [Ollama](../recipes/ollama.md) and [Claude Code](../recipes/claude-code.md)
 recipes with `--output-dir benchmarking/snapshots/<date>_<label>/<model>`, then compare
-two snapshot folders:
+two snapshot folders. The comparison reads the `benchmark-*.json` files of both runs, so
+it needs runs made on this machine (the JSON stays local) and its Markdown output is what
+gets committed:
 
 ```bash
 python -m benchmarking.compare benchmarking/snapshots/<before> benchmarking/snapshots/<after> \
