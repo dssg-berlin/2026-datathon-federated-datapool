@@ -154,6 +154,13 @@ By default they go to `reports/benchmark/` (git-ignored). To keep a run as a ref
 write it to `benchmarking/snapshots/<date>_<label>/` with `--output-dir` and commit it.
 [snapshots/README.md](snapshots/README.md) lists the committed snapshots and compares them.
 
+**Comparing two results.** `python -m benchmarking.compare <before> <after>` writes a
+Markdown comparison of two results, for example before and after a change to the server:
+pass, right-tool and tool-call rates per model and suite, the cases that were gained and
+lost, and the tools called by mistake. Each side is a `benchmark-*.json` or a folder with
+such files (one subfolder per model is fine); `--labels` names the two sides and `--output`
+writes a file. Only models, tool profiles and cases that both sides ran are compared.
+
 Two rates describe tool calling: **right tool** (the first tool call is one of the tools
 the case accepts) and **tool call** (right tool, arguments valid against the schema and
 matching the expected values).
@@ -270,7 +277,7 @@ benchmarking/
 ├── recipes/                  how-tos for concrete setups (Ollama, Claude Code)
 ├── evaluators/               deterministic evaluators and the optional rubric judge
 ├── metrics/                  scorecards, summaries, Wilson intervals, paired changes
-├── reporters/                Markdown / CSV / JSON
+├── reporters/                Markdown / CSV / JSON, and the comparison of two results (compare.py is its CLI)
 └── stress_chaos/             fault injection between the agent loop and the server
 ```
 

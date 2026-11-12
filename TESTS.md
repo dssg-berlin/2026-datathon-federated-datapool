@@ -246,6 +246,7 @@ Offline, no LLM: scripted models, a fake tool runner, and a stand-in `litellm` m
 | `test_claude_code_command_offers_only_the_profile_tools` | `claude -p` gets no built-in tools, hides tools outside the profile; MCP config for HTTP and stdio; in-process is refused |
 | `test_models_yaml_loads_and_passes_extra_params` | the shared `models.yaml` loads and holds no setup-specific entries; every Ollama entry has `num_ctx` ≥ 16k, and it reaches the LiteLLM request |
 | `test_local_models_file_overrides_and_adds` | `models.local.yaml` (here: the example file) replaces a shared entry by id and adds new models and tiers |
+| `test_comparison_of_two_results` | `benchmarking.compare`: only shared models and cases are compared; removed tools, gained and lost cases and tools called by mistake are reported; a missing folder is an error |
 | `test_adapters_are_found_by_provider` | a module in `adapters/` is found by its `PROVIDER`; other providers use the LiteLLM loop; the Claude Code adapter refuses `--offline` |
 | `test_right_tool_rate_and_tool_confusions` | right-tool rate ignores cases without an expected tool; confusions are counted per (expected, first call) |
 ### `test_provenance.py` – `explain_provenance` and `list_sources`

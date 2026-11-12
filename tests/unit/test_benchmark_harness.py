@@ -441,3 +441,44 @@ def test_adapters_are_found_by_provider():
     from benchmarking.core.mcp_client import MCPConnectionConfig
     refused = asyncio.run(claude.preflight(MCPConnectionConfig(transport="inprocess"), False))
     assert "--offline" in refused
+
+
+def test_comparison_of_two_results(tmp_path):
+    from benchmarking.compare import main as compare_main
+    from benchmarking.metrics.aggregator import RunScorecard
+    from benchmarking.reporters.comparison import comparison_markdown, load_results
+
+    def card(case_id, called, passed, model="m"):
+        return RunScorecard(
+            model_id=model, tool_profile="all", suite="smoke", case_id=case_id, run_index=1, section="smoke",
+            language="", expected_tools=["find_social_help"], tools_called=called, passed=passed,
+            stage="" if passed else "wrong tool chosen", composite_score=1.0 if passed else 0.0,
+            evaluator_scores={}, evaluator_passed={"tool_selection": passed, "contact_grounding": True},
+            steps=1, tool_errors=0, total_tokens=100, estimated_cost_usd=0.0, model_latency_ms=0.0,
+            tool_latency_ms=0.0, final_answer="")
+
+    def write(folder, cards, tools):
+        (tmp_path / folder / "model-a").mkdir(parents=True)
+        (tmp_path / folder / "model-a" / "benchmark-1.json").write_text(json.dumps({
+            "meta": {"server": folder, "started_at": "2026-01-01", "offered_tools": {"all": tools}},
+            "runs": [c.model_dump() for c in cards]}), encoding="utf-8")
+
+    write("before", [card("a", ["count_facilities"], False), card("b", ["find_social_help"], True),
+                     card("c", ["find_social_help"], True), card("only-before", ["find_social_help"], True),
+                     card("a", ["find_social_help"], True, model="other")],
+          ["find_social_help", "count_facilities", "old_tool"])
+    write("after", [card("a", ["find_social_help"], True), card("b", ["find_social_help"], True),
+                    card("c", ["count_facilities"], False)], ["find_social_help", "count_facilities"])
+
+    before, before_metas = load_results(tmp_path / "before")
+    after, after_metas = load_results(tmp_path / "after")
+    text = comparison_markdown(before, after, before_metas, after_metas, labels=("old", "new"))
+    assert "| m | all | 3 | 2/3 (67%) | 2/3 (67%) |" in text, "only the three shared cases, and an unchanged rate once"
+    assert "tools removed: `old_tool`" in text and "other / all" in text and "1 case(s) ran on one side only" in text
+    assert "1 gained, 1 lost" in text and "lost: `c` (wrong tool chosen)" in text and "gained: `a`" in text
+    assert "| m | all | `count_facilities` 1 | `count_facilities` 1 |" in text
+
+    output = tmp_path / "comparison.md"
+    assert compare_main([str(tmp_path / "before"), str(tmp_path / "after"), "--output", str(output)]) == 0
+    assert output.read_text(encoding="utf-8").startswith("# Benchmark comparison: before → after")
+    assert compare_main([str(tmp_path / "missing"), str(tmp_path / "after")]) == 2
