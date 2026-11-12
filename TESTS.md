@@ -325,17 +325,18 @@ the graph's triples (rdflib, not the `.rq` files).
 
 | Test | Checks |
 |---|---|
-| `test_baseline_tools_are_listed` | none of the 22 tools in `SMOKE_ARGS` disappeared |
+| `test_server_sends_instructions_with_crisis_numbers` | the server's MCP instructions (shown to the model by clients) carry the no-invention rule and the crisis numbers |
+| `test_baseline_tools_are_listed` | none of the 19 tools in `SMOKE_ARGS` disappeared |
 | `test_every_listed_tool_has_smoke_args` | **fails when someone adds a tool without registering it in `SMOKE_ARGS`** – the prompt to add tests |
-| `test_tool_metadata_is_llm_friendly` (×22) | docstring ≥ 20 chars, valid object schema, required ⊆ properties |
-| `test_tool_call_succeeds` (×22) | call with valid args returns no MCP error and non-empty output |
+| `test_tool_metadata_is_llm_friendly` (×19) | docstring ≥ 20 chars, valid object schema, required ⊆ properties |
+| `test_tool_call_succeeds` (×19) | call with valid args returns no MCP error and non-empty output |
 | `test_tool_returns_valid_json_without_nan` (×21) | output parses as JSON; no bare `NaN` (`count_facilities` returns a plain number and is excluded) |
 | `test_umlauts_are_not_escaped` | `ensure_ascii=False` works end-to-end |
 | `test_missing_required_argument_is_an_error` | error names the missing argument |
 | `test_wrong_argument_type_is_an_error` | wrong type rejected |
 | `test_explain_provenance_input_errors_reach_the_model` | a foreign IRI or unknown field is an MCP error whose text says what is wrong (raised as `ToolError`: mcp 2.x hides other exception messages) |
 | `test_endpoint_errors_reach_the_model` (×5) | a read or connect timeout, an unreachable endpoint, HTTP 503 and a non-JSON answer each reach the model with their reason (`EndpointError` → `ToolError`), not just "Error executing tool" |
-| `test_every_tool_reports_endpoint_errors` (×22) | **fails when a tool is registered with `@mcp.tool()` instead of `@tool`**: an endpoint timeout reaches the model as "did not answer within 30 s" |
+| `test_every_tool_reports_endpoint_errors` (×19) | **fails when a tool is registered with `@mcp.tool()` instead of `@tool`**: an endpoint timeout reaches the model as "did not answer within 30 s" |
 | `test_unknown_tool_is_an_error` | unknown tool → error |
 | `test_server_starts_over_stdio` | `python server.py` starts and completes the MCP handshake |
 
@@ -365,10 +366,6 @@ the server is switched to for one call).
 | `test_e2e_search_facilities_fields_come_from_the_graph` | Berlin-Mitte: name, street, postal code, city, phone, email, homepage == the graph's values |
 | `test_e2e_get_facility_details_partial_name_finds_every_match` | `BERATUNG` finds exactly the facilities whose name contains "beratung" |
 | `test_e2e_get_facility_details_includes_address_and_provider` | Drehscheibe: address and provider (IRI, name, homepage) == the graph's links |
-| `test_e2e_compare_facilities_equals_two_detail_lookups` | result == two `get_facility_details` calls, both non-empty |
-| `test_e2e_compare_facilities_keeps_order_and_reports_unknown_as_empty` | order kept; an unknown name gives `matches: []`, the other side is still found |
-| `test_e2e_search_services_matches_name_category_or_audience` | `MEDIKAMENT` finds exactly the services with it in name, category or audience (incl. audience-only ones) |
-| `test_e2e_search_services_no_match_and_quotes_stay_literal` | no match and a quote-breaking query (`") or true or ("`-style) both give `[]` |
 | `test_e2e_find_social_help_matches_the_need_with_phones_first` | addiction: `total_matches` == the graph's services matching the need's terms; every result on topic; phone numbers first |
 | `test_e2e_find_social_help_postal_prefix_and_unknown_need` | prefix 109 narrows the debt results and every result starts with 109; "pizza" returns the valid needs |
 | `test_e2e_data_quality_report_overview_counts_every_facility_once` | `total_facilities` and the organisation count == the graph's; each organisation's facility count == the graph's (provider name, else source website, else unknown); largest first |
@@ -389,10 +386,8 @@ the server is switched to for one call).
 | `test_e2e_facilities_per_inhabitant_by_region_density_and_bad_input` | `lowest_per_10k` (default) ascending from 0, `highest_per_10k` the reverse; average, density, inhabitants per facility and `relative_to_average` recomputed; areas 175 and 186 (under 10,000 inhabitants) are only ranked with `min_inhabitants=0`; unknown level/order, a prefix as long as the level, or a non-digit prefix → error |
 | `test_e2e_records_to_fix_first_ranks_only_the_city` | every Berlin facility ranked once; bucket and priority counts add up; ranks 1…n; high → medium → low |
 | `test_e2e_records_to_fix_first_bucket_filter_and_provider_batches` | `bucket=scope_check` returns exactly that bucket; provider batches cover every facility except scope-check/junk |
-| `test_e2e_find_nearby_matches_distances_from_the_graph` | 13353, 1 km: origin == average of its addresses; results == facilities within 1 km by haversine on the graph; distances match; nearest first |
+| `test_e2e_find_nearby_matches_distances_from_the_graph` | 13353, 1 km: origin == average of its addresses; results == facilities within 1 km by haversine on the graph; distances match; nearest first; each result's map link points at its coordinates |
 | `test_e2e_find_nearby_unresolvable_location_reports_error` | a street name → JSON with `error` and no results |
-| `test_e2e_get_awo_details_known_facility_matches_graph` | org-229a4e0b1081: name, phone, email, hours and address == the graph's; map link points at its coordinates |
-| `test_e2e_get_awo_details_unknown_iri_is_a_message_not_an_error` | unknown IRI → "No facility found" text, not an MCP error |
 | `test_e2e_get_entity_card_fields_and_links_match_graph` | Frauenladen: fields == the graph's values, `missing_fields` == fields the graph lacks, address link and linked services == the graph's |
 | `test_e2e_get_entity_card_service_resolves_to_its_office` | a service card resolves `schema:provider` to the graph's facility with its name; unknown IRI → `not_found`, malformed → `invalid_iri` |
 | `test_e2e_search_service_candidates_total_and_offices_match_graph` | "Schuldner": service IDs == the graph's matching services; each office id, name and locality == the graph's |
@@ -404,7 +399,7 @@ the server is switched to for one call).
 | `test_e2e_list_sources_counts_records_and_coverage_from_the_graphs` | on the TriG snippet: records per source == `cdp:fromSource` counts in `mapped.ttl`, coverage == `cdp:coverageLabel`, every source has a harvest time |
 | `test_e2e_list_sources_without_pipeline_graphs_is_empty_with_notes` | on directory.ttl (no pipeline graphs): no sources, but the reading notes are there |
 | `test_e2e_find_help_prompt_is_listed_and_renders` | `find_help` is listed with optional `situation`/`location`, renders with the inputs and tool names, has no unfilled placeholders, and says "not given yet" without inputs |
-| `test_e2e_find_help_prompt_only_uses_tools_and_arguments_that_exist` | the tools, `find_nearby` arguments and `source_url` field the prompt names all exist on the server |
+| `test_e2e_find_help_prompt_only_uses_tools_and_arguments_that_exist` | the tools, `find_nearby` arguments and the `map_url` / `source_page` fields the prompt names all exist on the server |
 | `test_find_help_prompt_is_listed_and_renders` | `find_help` is listed with optional `situation`/`location`, renders with the inputs and tool names, has no unfilled placeholders, and says "not given yet" without inputs |
 
 ## Layer 3 – SPARQL API (`tests/api/test_sparql.py`)
@@ -443,7 +438,7 @@ in Python).
 | `test_check_completeness_consistent` | rows == dataset sizes; IRI never missing; cells and missing counts add up; percentages 0–100 |
 | `test_generate_statistics_consistent` | with + without address/provider == facility total; Berlin in `facilities_by_city` == `count_facilities`; per-provider and per-category sums are plausible |
 | `test_compare_facilities_equals_two_detail_lookups` | both sides == `get_facility_details` for each name, both non-empty |
-| `test_mcp_tool_returns_client_result` (×19) | every tool called over MCP returns exactly what `SparqlClient` returns (JSON round trip) |
+| `test_mcp_tool_returns_client_result` (×16) | every tool called over MCP returns exactly what `SparqlClient` returns (JSON round trip) |
 | `test_postal_code_origin_is_where_the_postal_code_is` | 10115 resolves to central Berlin |
 | `test_find_nearby_matches_independent_distance_check` (×2) | 10115 (1 km) and central Munich (1.5 km): result count == facilities within the radius from a plain coordinate query with distances in Python; results nearest first |
 | `test_find_nearby_query_only_narrows` | `query="Sucht"` finds some but not more than without a query |
@@ -495,23 +490,20 @@ tool call is scored.
 |---|---|---|
 | `count_facilities` | `count-berlin`, `count-muenchen-german` | German question; city must stay "München" (not "Munich") |
 | `search_facilities` | `search-facilities-berlin`, `search-facilities-koeln-german` | German, asks for a list with contacts (list, not count) |
-| `get_facility_details` | `facility-details`, `facility-details-who-runs-it` | quoted name in a casual question about the provider |
-| `search_services` | `search-services-sucht`, `search-services-catalogue-pflege` | catalogue search by a maintainer, not a person seeking help |
+| `get_facility_details` | `facility-details`, `facility-details-who-runs-it`, `compare`, `compare-side-by-side` | quoted name in a casual question about the provider; comparing two facilities starts with a lookup of the first |
 | `find_social_help` | `find-help-debt`, `find-help-addiction-english` | need stated indirectly in English ("alcohol problem" → `addiction`) |
 | `data_quality_report` | `quality-report-overview`, `quality-report-caritas` | German request for a report on one organisation (`organisation: caritas`) |
 | `detect_duplicates` | `duplicates`, `duplicates-before-publishing` | "entered twice" instead of "duplicate" |
 | `check_completeness` | `completeness`, `completeness-missing-phone-german` | German question about one column (phone) |
 | `generate_statistics` | `statistics`, `statistics-top-city-and-category` | a concrete question the statistics answer, without the word "statistics" |
-| `compare_facilities` | `compare`, `compare-side-by-side` | "side by side", argument order kept |
 | `list_providers` | `list-providers`, `list-providers-german` | German "Träger" |
 | `search_by_postal_code` | `postal-code-exact-area`, `postal-code-german` | must pick the exact postal code search, not `find_nearby` |
 | `count_facilities_per_postal_code` | `postal-code-density`, `postal-code-underserved-german` | German "fewest per inhabitant" → `order=lowest_per_10k` with a prefix |
 | `facilities_per_inhabitant_by_region` | `region-density-lowest-germany`, `region-density-zones-german` | Germany-wide ratio question picks this tool, not the per-postcode one; German "Postleitzahlzonen" → `level=zone` |
 | `records_to_fix_first` | `fix-first-berlin`, `fix-first-outreach-by-provider` | optional `group_by="provider"` for provider outreach |
 | `find_nearby` | `nearby-postal-code`, `nearby-coordinates` | coordinates instead of a postal code |
-| `get_awo_details` | `awo-details-by-iri`, `awo-details-accessibility` | accessibility question; answer must contain the street |
-| `get_entity_card` | `entity-card-by-iri`, `entity-card-service-to-office` | German; a service IRI whose office must be followed (answer names Frauenladen) |
-| `search_service_candidates` | `service-candidates-with-office`, `service-candidates-senioren-german` | German; matches the audience/category "Senioren" |
+| `get_entity_card` | `entity-card-by-iri`, `entity-card-service-to-office`, `awo-details-by-iri`, `awo-details-accessibility` | German; a service IRI whose office must be followed (answer names Frauenladen); an accessibility question whose answer must contain the street |
+| `search_service_candidates` | `service-candidates-with-office`, `service-candidates-senioren-german`, `search-services-sucht`, `search-services-catalogue-pflege` | German; matches the audience/category "Senioren"; catalogue search by a maintainer |
 | `search_directory` | `directory-count-with-phone`, `directory-sucht-with-phone-german` | German; optional `has_telephone=true` filter |
 | `explain_provenance` | `provenance-phone`, `provenance-opening-hours-german` | German; an entry ID instead of a name and the optional `field="opening_hours"` |
 | `list_sources` | `sources`, `sources-awo-coverage-german` | German question about one source's coverage; answer must name "Berlin-Mitte" |

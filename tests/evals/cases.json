@@ -41,13 +41,13 @@
   {
     "id": "search-services-sucht",
     "prompt": "Which services do you offer around Suchtberatung?",
-    "expect_tool": "search_services",
+    "expect_tool": "search_service_candidates",
     "expect_args": {"query": "Suchtberatung"}
   },
   {
     "id": "search-services-catalogue-pflege",
     "prompt": "I'm cleaning up our service catalogue. Search it for everything with \"Pflege\" in it and show me the service names and categories.",
-    "expect_tool": "search_services",
+    "expect_tool": "search_service_candidates",
     "expect_args": {"query": "Pflege"}
   },
   {
@@ -101,14 +101,14 @@
   {
     "id": "compare",
     "prompt": "Compare the facilities Drehscheibe and Metropolitankapitel.",
-    "expect_tool": "compare_facilities",
-    "expect_args": {"facility_1": "Drehscheibe", "facility_2": "Metropolitankapitel"}
+    "expect_tool": "get_facility_details",
+    "expect_args": {"name": "Drehscheibe"}
   },
   {
     "id": "compare-side-by-side",
     "prompt": "My dad can't decide between Drehscheibe and Haus Lübecker Straße. Can you put the two side by side for me?",
-    "expect_tool": "compare_facilities",
-    "expect_args": {"facility_1": "Drehscheibe", "facility_2": "Lübecker"}
+    "expect_tool": "get_facility_details",
+    "expect_args": {"name": "Drehscheibe"}
   },
   {
     "id": "list-providers",
@@ -185,14 +185,14 @@
   {
     "id": "awo-details-by-iri",
     "prompt": "What are the opening hours and contact details of the facility https://civic-data.de/federated-directory#org-229a4e0b1081?",
-    "expect_tool": "get_awo_details",
+    "expect_tool": "get_entity_card",
     "expect_args": {"iri": "org-229a4e0b1081"},
     "answer_contains": ["WIGWAM"]
   },
   {
     "id": "awo-details-accessibility",
     "prompt": "I use a wheelchair. Can I get into the facility https://civic-data.de/federated-directory#org-229a4e0b1081, and where exactly is it?",
-    "expect_tool": "get_awo_details",
+    "expect_tool": "get_entity_card",
     "expect_args": {"iri": "org-229a4e0b1081"},
     "answer_contains": ["Stromstraße"]
   },

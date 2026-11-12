@@ -1,0 +1,2 @@
+model,tool_profile,runs,passed,pass_rate,ci_lower,ci_upper,composite_mean,right_tool_rate,tool_selection_pass_rate,contact_hallucination_rate,judge_complete_rate,latency_p50_ms,latency_p95_ms,total_tokens,total_cost_usd
+qwen-2-5-7b-ollama,all,92,59,0.6413,0.539453,0.731829,0.8679,0.6889,0.6778,0.0435,,39976.02,206910.69,1097006,0.0

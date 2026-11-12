@@ -1,0 +1,2 @@
+model,tool_profile,runs,passed,pass_rate,ci_lower,ci_upper,composite_mean,right_tool_rate,tool_selection_pass_rate,contact_hallucination_rate,judge_complete_rate,latency_p50_ms,latency_p95_ms,total_tokens,total_cost_usd
+claude-code-opus,all,92,82,0.8913,0.811362,0.939878,0.967,0.9667,0.9556,0.0333,,21423.5,53649.6,4302411,10.404694

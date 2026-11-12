@@ -38,5 +38,7 @@ tool_profiles:
   v2:
     exclude: ["search_directory"]
   datathon_original:
+    # The CSV-era tools that still exist (search_services and compare_facilities were removed
+    # as duplicates of search_service_candidates and get_facility_details).
     include: ["count_facilities", "detect_duplicates", "search_facilities", "get_facility_details",
-              "search_services", "check_completeness", "generate_statistics", "compare_facilities"]
+              "check_completeness", "generate_statistics"]

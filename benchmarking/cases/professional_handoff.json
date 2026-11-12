@@ -10,8 +10,7 @@
       "search_directory",
       "search_service_candidates",
       "find_social_help",
-      "find_nearby",
-      "search_services"
+      "find_nearby"
     ],
     "expect_args_by_tool": {
       "search_directory": {
@@ -37,7 +36,6 @@
     "expect_tool": [
       "search_directory",
       "search_service_candidates",
-      "search_services",
       "find_social_help"
     ],
     "expect_args_by_tool": {
@@ -58,8 +56,7 @@
     "expect_tool": [
       "search_directory",
       "find_nearby",
-      "search_service_candidates",
-      "search_services"
+      "search_service_candidates"
     ],
     "english_translation": "For a client who needs step-free access I am looking for a counselling centre for women in Berlin. Which matching places are described as barrier-free? Give available contacts and separate the documented accessibility from whether the actual route is step-free. If none is documented, say what must be clarified before a referral.",
     "rubric": "Professional handoff: grade literal fulfilment of every part of the request. Contact details must be copied exactly from the tool results and attributed to the right office (facility vs. provider). Unrecorded fields must be named as missing, not filled in. The answer must separate what the directory records from what still has to be checked. Separate documented 'barrierefrei' from actual step-free access; women-specific services only, or say none is documented."
@@ -72,7 +69,6 @@
     "section": "Professional handoff",
     "source": "datathon directory-search transfer prompts (Eric Li)",
     "expect_tool": [
-      "compare_facilities",
       "get_facility_details",
       "search_directory",
       "get_entity_card"
@@ -90,8 +86,7 @@
     "expect_tool": [
       "get_facility_details",
       "search_directory",
-      "get_entity_card",
-      "get_awo_details"
+      "get_entity_card"
     ],
     "expect_args_by_tool": {
       "get_facility_details": {
@@ -130,7 +125,6 @@
       "get_facility_details",
       "search_directory",
       "detect_duplicates",
-      "compare_facilities",
       "get_entity_card"
     ],
     "expect_args_by_tool": {

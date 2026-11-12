@@ -26,7 +26,7 @@ The code for the data pool was written by Benjamin Degenhart and is available on
 ```text
 AI assistant (Claude Desktop, Claude Code, ...)
    │  MCP over stdio, or streamable HTTP (Docker)
-server.py               20 MCP tools; each calls one SparqlClient method and returns JSON
+server.py               19 MCP tools; each calls one SparqlClient method and returns JSON
    │
 src/sparql_client.py    loads a query file, fills in the parameters, sends it,
    │                    turns the result rows into the tool's answer
@@ -61,9 +61,7 @@ Tools never build query strings themselves. User input only reaches a query thro
 |---|---|---|
 | `count_facilities(city)` | Number of facilities in a city | "How many facilities are in Berlin?" |
 | `search_facilities(city)` | Facilities in a city with address and contact data | "List the facilities in Berlin with their contact info" |
-| `get_facility_details(name)` | Details, address and provider of facilities whose name contains `name` | "Tell me about the facility Drehscheibe" |
-| `compare_facilities(facility_1, facility_2)` | `get_facility_details` for both names, side by side | "Compare Drehscheibe and Metropolitankapitel" |
-| `search_services(query)` | Services whose name, category or audience contains `query` | "Which services are there around Suchtberatung?" |
+| `get_facility_details(name)` | Details, address and provider of facilities whose name contains `name`. To compare two facilities, the assistant calls it once per name | "Tell me about the facility Drehscheibe", "Compare Drehscheibe and Metropolitankapitel" |
 | `find_social_help(need, limit, postal_code_prefix)` | Offers for a need (debt, housing, family, elderly, addiction, migration) with address and contacts; missing contacts are reported as not on record | "Ich habe Schulden, wo bekomme ich Hilfe?" |
 | `data_quality_report(organisation)` | Data quality scorecard per organisation (fill rate of phone, email, website, hours, category, address), what to improve, and a draft message to the organisation | "How good is the Caritas data and what should they fix?" |
 | `generate_statistics()` | Dataset sizes; facilities per city, category and provider; services per category and audience; how many facilities have an address or provider | "Give me statistics about the directory" |
@@ -74,13 +72,19 @@ Tools never build query strings themselves. User input only reaches a query thro
 | `count_facilities_per_postal_code(postal_code_prefix, order, limit)` | Facilities, inhabitants and facilities per 10,000 inhabitants per postal code, including codes without any facility; `order` is `most_facilities`, `highest_per_10k` or `lowest_per_10k`. Inhabitants come from `data/einwohner_plz_de.csv` and are estimates (a municipality's population spread evenly over its codes) | "Which postal codes starting with 13 have the fewest facilities per inhabitant?" |
 | `facilities_per_inhabitant_by_region(level, order, postal_code_prefix, limit, min_inhabitants)` | Regions compared by facilities per 10,000 inhabitants: `level` is `zone` (first postcode digit), `region` (two digits, default) or `area` (three digits). Each region is named by its towns with the most facilities and carries inhabitants per facility and its density relative to the average. Regions under `min_inhabitants` (default 10,000) are counted but not ranked | "Where in Germany is the ratio of organisations to inhabitants the lowest?" |
 | `records_to_fix_first(city, ...)` | Facility records of a city ranked by how much fixing them matters, with reasons, provider batches and a projected coverage gain | "Which Berlin records should we fix first?" |
-| `find_nearby(location, radius_km, query, accessible_only, limit)` | Facilities within a radius of a postal code or `"latitude,longitude"`, nearest first, with distance, contacts and opening hours. `query` takes comma-separated terms and matches any of them | "Addiction counselling near 13353?" |
-| `get_awo_details(iri)` | Address, map link, contacts, opening hours, accessibility, offers, provider and source link for one facility | "What are the opening hours of this facility?" |
-| `get_entity_card(iri)` | Every recorded field of a facility, service, provider or address, the missing fields, syntax-only quality notes (e.g. a phone without leading 0) and typed links (service → facility → address/provider) | "What exactly does the directory record for this entry?" |
-| `search_service_candidates(query, limit, offset)` | Services matching name/category/audience, each with the facility or provider that runs it and its postal code and locality; paged | "Which debt counselling services are there, and which office runs each?" |
+| `find_nearby(location, radius_km, query, accessible_only, limit)` | Facilities within a radius of a postal code or `"latitude,longitude"`, nearest first, with distance, contacts, opening hours and a map link. `query` takes comma-separated terms and matches any of them | "Addiction counselling near 13353?" |
+| `get_entity_card(iri)` | Every recorded field of a facility, service, provider or address by its IRI: contacts, opening hours, accessibility, source link, the missing fields, syntax-only quality notes (e.g. a phone without leading 0) and typed links (service → facility → address/provider) | "What are the opening hours of this facility?", "What exactly does the directory record for this entry?" |
+| `search_service_candidates(query, limit, offset)` | Services matching name/category/audience, each with the facility or provider that runs it and its postal code and locality; paged | "Which services are there around Suchtberatung?", "Which office runs each debt counselling service?" |
 | `search_directory(query, provider, has_telephone, limit, offset)` | Facilities where every term matches their own text, address or a linked service; provider and phone filters; paged hits, with totals and missing-field counts over all matches | "How many debt counselling facilities in Kreuzberg have a phone number?" |
 | `explain_provenance(facility, field=None)` | For one entry (name, IRI or ID): its source records with detail pages, and per field which sources supplied each value, whether they agree and which values the directory kept or inherited | "Which sources list this facility's phone number, and do they agree?" |
 | `list_sources()` | The federated sources with declared coverage, record counts and harvest dates | "Which organisations' data is in the directory, and how current is it?" |
+
+Every tool has one job, and its description says when to use it and which neighbouring
+tool to use instead. Three tools of the datathon version were removed because agents could
+not tell them from another tool: `compare_facilities` (it called `get_facility_details`
+twice), `search_services` (a subset of `search_service_candidates`) and `get_awo_details`
+(covered by `get_entity_card`; its map link moved to `find_nearby`). The effect is
+measured in [benchmarking/snapshots](benchmarking/snapshots/README.md).
 
 Matching is case-insensitive (`GIESSEN` finds `Gießen`). City matches are **exact**, so
 `Berlin` does not include `Berlin-Mitte`. Name and service searches are substring matches.
@@ -95,6 +99,11 @@ comes from DHS and Sozialplattform, `+4963136120225` from Caritas. DHS and Sozia
 also give different opening hours, and the directory keeps only Sozialplattform's. The
 homepage of *Drehscheibe Kinder - und Jugendpolitik* is not in its own AWO record but
 inherited from its Träger, so it may lead to a head office.
+The server also sends short **instructions** when a client connects (`INSTRUCTIONS` in
+`server.py`). MCP clients show them to the model next to the tool list: search in German,
+never invent contact details, and give the emergency numbers first when someone is in a
+crisis.
+
 ## Prompts
 
 | Prompt | What it does |
