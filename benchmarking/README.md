@@ -8,7 +8,7 @@ contributions:
 - **Benchmarking harness** (Mrunal): multilingual and dialect test suite, deterministic
   evaluators (tool choice, hallucinated contacts, safe abstention, crisis escalation),
   fault injection, Wilson confidence intervals.
-- **Directory-search evaluation** (Eric Li): professional handoff prompts, a rubric for
+- **Directory-search evaluation** ([Eric Li](https://github.com/MrEricL/2026-datathon-federated-datapool/commit/b33f7ca258220e4a807b917075de329988db5445)): professional handoff prompts, a rubric for
   literal fulfilment and contact risk, and comparing tool sets (original tools vs. + the
   linked-search tools) with paired outcomes. Its three tools are now part of `server.py`
   (`get_entity_card`, `search_service_candidates`, `search_directory`).
